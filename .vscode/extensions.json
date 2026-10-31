@@ -1,0 +1,10 @@
+{
+  // VS Code offers to install these when the folder is opened.
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "ms-python.mypy-type-checker",
+    "humao.rest-client"
+  ]
+}

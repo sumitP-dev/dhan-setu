@@ -26,4 +26,8 @@ htmlcov/
 # OS / editors
 .DS_Store
 .idea/
-.vscode/
+# Share the project's VS Code setup, not personal editor state.
+.vscode/*
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/extensions.json

@@ -1,0 +1,126 @@
+# Dhan Setu API: manual requests for the VS Code "REST Client" extension (humao.rest-client).
+# Click "Send Request" above any request. Run them top to bottom: later requests reuse
+# tokens from earlier responses (e.g. {{login.response.body.$.tokens.access_token}}).
+#
+# OTP codes: the SMS sender is a stub, so the code is printed in the server log:
+#   [SMS stub] verify_phone OTP for +91******3210: 123456
+# Copy it into @otp below. Codes expire after 5 minutes.
+# (With DEBUG=true in .env, responses also include the code as "dev_otp".)
+
+@baseUrl = http://localhost:8000/api/v1
+@email = you@example.com
+@phone = 9876543210
+@password = Secret123
+@otp = 000000
+
+
+### Health: process is up
+GET {{baseUrl}}/health
+
+
+### Readiness: PostgreSQL and Redis reachable
+GET {{baseUrl}}/health/ready
+
+
+### 1. Register: account starts as pending_verification and a code is "sent"
+# @name register
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "phone": "{{phone}}",
+  "full_name": "Asha Verma",
+  "password": "{{password}}"
+}
+
+
+### 2. (Optional) Send a new code if the last one expired. One per number every 30 seconds.
+POST {{baseUrl}}/auth/otp/send
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "purpose": "verify_phone"
+}
+
+
+### 3. Verify phone: activates the account and returns user + tokens. Set @otp first.
+# @name verify
+POST {{baseUrl}}/auth/otp/verify
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "purpose": "verify_phone",
+  "code": "{{otp}}"
+}
+
+
+### 4. Login with email or mobile number + password
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "identifier": "{{phone}}",
+  "password": "{{password}}"
+}
+
+
+### 5. Current user (uses the access token from step 4)
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### 6. Update profile name
+PATCH {{baseUrl}}/users/me
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+Content-Type: application/json
+
+{
+  "full_name": "Asha V."
+}
+
+
+### 7. Refresh: swaps the refresh token from step 4 for a new pair.
+# The old refresh token stops working; sending this twice signs the session out (reuse detection).
+# @name refresh
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{login.response.body.$.tokens.refresh_token}}"
+}
+
+
+### 8. Logout: ends this device's session (uses the newest refresh token, from step 7)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refresh.response.body.$.refresh_token}}"
+}
+
+
+### ---- Login with OTP instead of password (account must be active)
+
+### A. Send a login code
+POST {{baseUrl}}/auth/otp/send
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "purpose": "login"
+}
+
+
+### B. Verify the login code (set @otp to the new code first)
+POST {{baseUrl}}/auth/otp/verify
+Content-Type: application/json
+
+{
+  "phone": "{{phone}}",
+  "purpose": "login",
+  "code": "{{otp}}"
+}
