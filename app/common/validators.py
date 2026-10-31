@@ -4,7 +4,7 @@ without Pydantic's "Value error, " prefix."""
 import re
 from typing import Annotated
 
-from pydantic import AfterValidator, EmailStr, StringConstraints
+from pydantic import AfterValidator, EmailStr, StringConstraints, TypeAdapter, ValidationError
 from pydantic_core import PydanticCustomError
 
 BCRYPT_MAX_PASSWORD_BYTES = 72
@@ -29,6 +29,33 @@ def normalize_indian_mobile(value: str) -> str:
     return f"+91{digits}"
 
 
+_email_adapter: TypeAdapter[str] = TypeAdapter(EmailStr)
+
+
+def normalize_login_identifier(value: str) -> str:
+    """Email (lower-cased) or Indian mobile number (E.164). Anything with "@" is treated
+    as an email; everything else as a mobile number."""
+    value = value.strip()
+    if "@" in value:
+        try:
+            return _email_adapter.validate_python(value).lower()
+        except ValidationError:
+            pass
+    else:
+        try:
+            return normalize_indian_mobile(value)
+        except PydanticCustomError:
+            pass
+    raise PydanticCustomError(
+        "identifier_invalid", "Enter a valid email or 10-digit Indian mobile number"
+    )
+
+
+def is_phone_identifier(identifier: str) -> bool:
+    """For values already passed through normalize_login_identifier."""
+    return identifier.startswith("+91")
+
+
 def validate_new_password(value: str) -> str:
     if len(value) < MIN_PASSWORD_LENGTH:
         raise PydanticCustomError(
@@ -47,7 +74,11 @@ def validate_new_password(value: str) -> str:
 # Lower-cased so "A@x.com" and "a@x.com" are the same account.
 NormalizedEmail = Annotated[EmailStr, AfterValidator(str.lower)]
 IndianMobileNumber = Annotated[str, AfterValidator(normalize_indian_mobile)]
+LoginIdentifier = Annotated[
+    str, StringConstraints(max_length=320), AfterValidator(normalize_login_identifier)
+]
 NewPassword = Annotated[str, AfterValidator(validate_new_password)]
 # For checking an existing password: no policy, just a sane size limit.
 ExistingPassword = Annotated[str, StringConstraints(min_length=1, max_length=128)]
+OtpCodeStr = Annotated[str, StringConstraints(pattern=r"^\d{6}$")]
 FullName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]

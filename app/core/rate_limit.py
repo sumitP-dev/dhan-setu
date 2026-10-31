@@ -40,3 +40,25 @@ class AttemptLimiter:
 
     async def reset(self, identifier: str) -> None:
         await self._redis.delete(self._key(identifier))
+
+
+class Cooldown:
+    """Allows an action once per period per identifier (e.g. one OTP SMS per 30s)."""
+
+    def __init__(self, redis: Redis, *, namespace: str, period: timedelta) -> None:
+        self._redis = redis
+        self._namespace = namespace
+        self._period_seconds = int(period.total_seconds())
+
+    async def start(self, identifier: str) -> None:
+        """Raises TooManyRequestsError if the identifier is still cooling down."""
+        key = f"cooldown:{self._namespace}:{identifier}"
+        # SET NX: atomic, so two parallel requests can't both get through.
+        if await self._redis.set(key, "1", ex=self._period_seconds, nx=True):
+            return
+        retry_after = await self._redis.ttl(key)
+        raise TooManyRequestsError(
+            "Please wait before requesting another code.",
+            code="otp_cooldown",
+            retry_after_seconds=max(retry_after, 1),
+        )

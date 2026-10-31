@@ -1,7 +1,10 @@
-from sqlalchemy import Boolean, String, true
+from datetime import datetime
+
+from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.database import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.common.enums import UserRole, UserStatus
+from app.core.database import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -13,7 +16,16 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     phone: Mapped[str] = mapped_column(String(13), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(100))
     password_hash: Mapped[str] = mapped_column(String(255))
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    role: Mapped[UserRole] = mapped_column(
+        str_enum(UserRole, length=16), default=UserRole.CUSTOMER, server_default="customer"
+    )
+    # New accounts stay pending until the mobile number is verified by OTP.
+    status: Mapped[UserStatus] = mapped_column(
+        str_enum(UserStatus),
+        default=UserStatus.PENDING_VERIFICATION,
+        server_default="pending_verification",
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     def __repr__(self) -> str:
         # Never include password_hash.

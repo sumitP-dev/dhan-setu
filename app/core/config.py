@@ -33,11 +33,16 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret_key: SecretStr
     access_token_ttl_minutes: int = Field(default=15, gt=0)
-    refresh_token_ttl_days: int = Field(default=30, gt=0)
+    refresh_token_ttl_days: int = Field(default=7, gt=0)
     # Each +1 doubles hashing time. 12 is ~0.25s; tests lower it to 4 for speed.
     bcrypt_rounds: int = Field(default=12, ge=4, le=16)
     login_max_attempts: int = Field(default=5, gt=0)
     login_lockout_minutes: int = Field(default=15, gt=0)
+
+    # One-time codes sent by SMS
+    otp_ttl_minutes: int = Field(default=5, gt=0)
+    otp_max_attempts: int = Field(default=5, gt=0)
+    otp_resend_cooldown_seconds: int = Field(default=30, gt=0)
 
     @field_validator("jwt_secret_key")
     @classmethod
@@ -50,6 +55,12 @@ class Settings(BaseSettings):
     @property
     def docs_enabled(self) -> bool:
         return self.environment != "production"
+
+    @property
+    def expose_dev_otp(self) -> bool:
+        """Return OTPs in API responses so developers don't need a real SMS.
+        Never in production, even if DEBUG is switched on there by mistake."""
+        return self.debug and self.environment != "production"
 
 
 @lru_cache

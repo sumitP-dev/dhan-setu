@@ -16,6 +16,9 @@ class UserRepository:
     async def get_by_email(self, email: str) -> User | None:
         return await self._session.scalar(select(User).where(User.email == email))
 
+    async def get_by_phone(self, phone: str) -> User | None:
+        return await self._session.scalar(select(User).where(User.phone == phone))
+
     async def email_exists(self, email: str) -> bool:
         return await self._exists(User.email == email)
 

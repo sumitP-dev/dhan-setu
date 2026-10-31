@@ -1,7 +1,8 @@
-"""Password hashing (bcrypt), access tokens (JWT) and refresh tokens (opaque)."""
+"""Password hashing (bcrypt), access tokens (JWT), refresh tokens (opaque) and OTPs."""
 
 import asyncio
 import hashlib
+import hmac
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -128,3 +129,25 @@ def generate_refresh_token() -> str:
 
 def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
+
+# ---- One-time codes (OTP)
+# A 6-digit code has only a million values, so a plain SHA-256 could be reversed by
+# trying them all. HMAC with the server secret means a database leak alone isn't enough.
+
+OTP_DIGITS = 6
+
+
+def generate_otp() -> str:
+    return f"{secrets.randbelow(10**OTP_DIGITS):0{OTP_DIGITS}d}"
+
+
+def hash_otp(code: str, *, phone: str, purpose: str, secret: SecretStr) -> str:
+    # phone + purpose are mixed in so a code can't be replayed for another number or flow.
+    message = f"{purpose}:{phone}:{code}".encode()
+    return hmac.new(secret.get_secret_value().encode(), message, hashlib.sha256).hexdigest()
+
+
+def otp_matches(code: str, code_hash: str, *, phone: str, purpose: str, secret: SecretStr) -> bool:
+    expected = hash_otp(code, phone=phone, purpose=purpose, secret=secret)
+    return hmac.compare_digest(expected, code_hash)

@@ -30,3 +30,21 @@ class CardNetwork(StrEnum):
 class CardType(StrEnum):
     CREDIT = "credit"
     DEBIT = "debit"
+
+
+class UserRole(StrEnum):
+    CUSTOMER = "customer"
+    MERCHANT = "merchant"
+    ADMIN = "admin"
+
+
+class UserStatus(StrEnum):
+    PENDING_VERIFICATION = "pending_verification"  # registered, mobile not verified yet
+    ACTIVE = "active"
+    BLOCKED = "blocked"
+
+
+class OtpPurpose(StrEnum):
+    VERIFY_PHONE = "verify_phone"
+    LOGIN = "login"
+    RESET_PASSWORD = "reset_password"  # noqa: S105  (reserved; no endpoint uses it yet)

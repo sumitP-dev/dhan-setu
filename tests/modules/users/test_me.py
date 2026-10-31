@@ -6,6 +6,7 @@ from pydantic import SecretStr
 from sqlalchemy import delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.common.enums import UserStatus
 from app.core.security import create_access_token
 from app.modules.users.models import User
 from tests.helpers import TEST_JWT_SECRET, bearer, register
@@ -69,7 +70,7 @@ async def test_token_for_deleted_user(client: AsyncClient, db_session: AsyncSess
 
 async def test_disabled_user(client: AsyncClient, db_session: AsyncSession) -> None:
     token = (await register(client))["tokens"]["access_token"]
-    await db_session.execute(update(User).values(is_active=False))
+    await db_session.execute(update(User).values(status=UserStatus.BLOCKED))
     await db_session.commit()
 
     response = await client.get("/api/v1/users/me", headers=bearer(token))

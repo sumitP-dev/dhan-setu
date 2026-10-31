@@ -1,11 +1,13 @@
 import math
 import time
+from dataclasses import dataclass
 from typing import Any
 
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 
+from app.common.enums import OtpPurpose
 from app.core.config import Settings
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -26,6 +28,8 @@ def make_settings(**overrides: Any) -> Settings:
         "redis_url": SecretStr(TEST_REDIS_URL),
         "jwt_secret_key": SecretStr(TEST_JWT_SECRET),
         "bcrypt_rounds": 4,  # the minimum; keeps tests fast
+        # Responses include dev_otp, which register() below relies on.
+        "debug": True,
     } | overrides
     return _IsolatedSettings(**values)
 
@@ -60,6 +64,18 @@ class FakeRedis:
         self._purge_if_expired(key)
         return self._data.get(key)
 
+    async def set(
+        self, key: str, value: str, *, ex: int | None = None, nx: bool = False
+    ) -> bool | None:
+        self._purge_if_expired(key)
+        if nx and key in self._data:
+            return None
+        self._data[key] = value
+        self._expires_at.pop(key, None)
+        if ex is not None:
+            self._expires_at[key] = time.monotonic() + ex
+        return True
+
     async def incr(self, key: str) -> int:
         self._purge_if_expired(key)
         value = int(self._data.get(key, "0")) + 1
@@ -92,6 +108,27 @@ class FakeRedis:
         return None
 
 
+@dataclass(frozen=True, slots=True)
+class SentSms:
+    phone: str
+    code: str
+    purpose: OtpPurpose
+
+
+class FakeSmsSender:
+    """Records OTPs instead of sending them."""
+
+    def __init__(self) -> None:
+        self.sent: list[SentSms] = []
+
+    async def send_otp(self, phone: str, code: str, purpose: OtpPurpose) -> None:
+        self.sent.append(SentSms(phone, code, purpose))
+
+    @property
+    def last(self) -> SentSms:
+        return self.sent[-1]
+
+
 # ---- API helpers
 
 
@@ -104,11 +141,37 @@ def user_payload(**overrides: str) -> dict[str, str]:
     } | overrides
 
 
-async def register(client: AsyncClient, **overrides: str) -> dict[str, Any]:
+async def start_registration(client: AsyncClient, **overrides: str) -> dict[str, Any]:
+    """POST /auth/register only: the account stays pending_verification."""
     response = await client.post("/api/v1/auth/register", json=user_payload(**overrides))
     assert response.status_code == 201, response.text
     body: dict[str, Any] = response.json()
     return body
+
+
+async def verify_otp(
+    client: AsyncClient, phone: str, code: str, purpose: str = "verify_phone"
+) -> Response:
+    return await client.post(
+        "/api/v1/auth/otp/verify", json={"phone": phone, "purpose": purpose, "code": code}
+    )
+
+
+async def register(client: AsyncClient, **overrides: str) -> dict[str, Any]:
+    """Register and verify the phone: returns {user, tokens} for an active account."""
+    started = await start_registration(client, **overrides)
+    response = await verify_otp(client, started["user"]["phone"], started["otp"]["dev_otp"])
+    assert response.status_code == 200, response.text
+    body: dict[str, Any] = response.json()
+    return body
+
+
+async def login(
+    client: AsyncClient, identifier: str = "asha@example.com", password: str = TEST_PASSWORD
+) -> Response:
+    return await client.post(
+        "/api/v1/auth/login", json={"identifier": identifier, "password": password}
+    )
 
 
 def bearer(access_token: str) -> dict[str, str]:

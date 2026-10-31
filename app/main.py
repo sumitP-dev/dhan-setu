@@ -10,6 +10,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import create_db_engine, create_session_factory
 from app.core.logging import configure_logging
 from app.core.redis import create_redis_client
+from app.modules.notifications.service import ConsoleSmsSender
 
 
 @asynccontextmanager
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.engine = create_db_engine(settings)
     app.state.session_factory = create_session_factory(app.state.engine)
     app.state.redis = create_redis_client(settings)
+    app.state.sms_sender = ConsoleSmsSender(log_codes=settings.environment != "production")
 
     if settings.cors_origins:
         app.add_middleware(

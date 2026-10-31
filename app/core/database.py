@@ -1,10 +1,11 @@
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy import DateTime, Dialect, MetaData, TypeDecorator, func
+from sqlalchemy import DateTime, Dialect, Enum, MetaData, TypeDecorator, func
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -59,6 +60,18 @@ class UTCDateTime(TypeDecorator[datetime]):
         if value is None:
             return None
         return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def str_enum(enum_cls: type[StrEnum], length: int = 32) -> Enum:
+    """Store a StrEnum as its value in a plain VARCHAR. Avoids PostgreSQL native enum
+    types, which need a migration for every new value."""
+    return Enum(
+        enum_cls,
+        native_enum=False,
+        length=length,
+        values_callable=lambda members: [member.value for member in members],
+        validate_strings=True,
+    )
 
 
 class TimestampMixin:

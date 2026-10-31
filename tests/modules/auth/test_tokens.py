@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import utcnow
 from app.modules.auth.models import RefreshToken
-from tests.helpers import register
+from tests.helpers import login, register
 
 
 async def _refresh(client: AsyncClient, refresh_token: str) -> Response:
@@ -47,10 +47,7 @@ async def test_reusing_old_token_revokes_the_whole_session(client: AsyncClient) 
 
 async def test_reuse_does_not_affect_other_devices(client: AsyncClient) -> None:
     phone = (await register(client))["tokens"]["refresh_token"]
-    login = await client.post(
-        "/api/v1/auth/login", json={"email": "asha@example.com", "password": "Secret123"}
-    )
-    tablet = login.json()["tokens"]["refresh_token"]
+    tablet = (await login(client)).json()["tokens"]["refresh_token"]
     await _refresh(client, phone)
     await _refresh(client, phone)  # replay -> phone's session revoked
 

@@ -13,8 +13,8 @@ app/
   core/                config (.env), database, redis, logging, security
   common/              exceptions (error shape), enums
   modules/<feature>/   models, schemas, repository, service, router, dependencies
-                       done: health, auth, users
-                       empty: cards, upi, bbps, payments, ledger, webhooks, notifications
+                       done: health, auth, users, notifications (SMS stub)
+                       empty: cards, upi, bbps, payments, ledger, webhooks
   models.py            imports all models so Alembic can see them
 alembic/               migrations
 tests/                 pytest (SQLite in memory, fake Redis); helpers.py has shared fakes
@@ -96,6 +96,25 @@ uv run uvicorn app.main:create_app --factory --reload --host 0.0.0.0 --port 8000
 
 `--host 0.0.0.0` lets the Android emulator reach the server at `http://10.0.2.2:8000`.
 
+## VS Code
+
+Open `dhan-setu-backend/` as the folder, or open `../dhan-setu.code-workspace`
+(File > Open Workspace from File...) to work on backend and mobile side by side.
+Accept the recommended extensions when prompted (Python, Debugger, Ruff, Mypy, REST Client).
+
+- **Run and Debug** (Cmd+Shift+D): `FastAPI: run & debug` starts the server on port 8000 with
+  breakpoints and auto-reload; `Pytest` and `Pytest: current file` debug the tests.
+- **Testing** (beaker icon): run or debug single tests.
+- Files are formatted and imports sorted on save, with the same Ruff settings as the command line.
+- If the interpreter isn't picked up: Cmd+Shift+P > "Python: Select Interpreter" > `.venv`.
+
+## Trying the API by hand
+
+`requests.http` walks through register -> verify OTP -> login -> /users/me -> refresh -> logout.
+Open it with the REST Client extension and click "Send Request" above each block, top to bottom.
+OTP codes appear in the server log (`[SMS stub] verify_phone OTP for +91******3210: 123456`);
+paste the code into `@otp` at the top of the file. Codes expire after 5 minutes.
+
 ## Migrations
 
 ```bash
@@ -113,8 +132,10 @@ Full interactive docs: http://localhost:8000/docs
 |---|---|---|---|
 | GET | `/api/v1/health` | - | Process is up |
 | GET | `/api/v1/health/ready` | - | PostgreSQL and Redis reachable |
-| POST | `/api/v1/auth/register` | - | Create account, returns user + tokens |
-| POST | `/api/v1/auth/login` | - | Email + password, returns user + tokens |
+| POST | `/api/v1/auth/register` | - | Create account (pending), texts a verify_phone OTP. No tokens yet |
+| POST | `/api/v1/auth/otp/send` | - | Text a code: `verify_phone` (pending accounts) or `login` (active accounts) |
+| POST | `/api/v1/auth/otp/verify` | - | Check the code. `verify_phone` activates the account. Returns user + tokens |
+| POST | `/api/v1/auth/login` | - | Email **or** mobile + password, returns user + tokens |
 | POST | `/api/v1/auth/refresh` | - | Swap refresh token for a new pair |
 | POST | `/api/v1/auth/logout` | - | Revoke this device's refresh token |
 | POST | `/api/v1/auth/change-password` | Bearer | Change password, signs out other devices |
@@ -126,10 +147,21 @@ Full interactive docs: http://localhost:8000/docs
 - **Access token**: JWT, 15 minutes. Send as `Authorization: Bearer <token>`.
   When it expires the API returns 401 with code `token_expired`: call `/auth/refresh`.
   Any other 401 (`invalid_token`, `invalid_refresh_token`) means: log in again.
-- **Refresh token**: random, 30 days, single use. Every refresh returns a new one.
+- **Sign-up**: `register` -> SMS code -> `otp/verify` (purpose `verify_phone`) -> tokens.
+  Until then the account is `pending_verification` and login returns 403 `phone_not_verified`.
+- **OTP**: 6 digits, valid 5 minutes, 5 wrong tries kill the code, one SMS per number per 30s
+  (429 `otp_cooldown` + `Retry-After`). Stored only as an HMAC. `otp/send` answers the same
+  whether or not the number is registered.
+- **Dev OTP**: the SMS provider is a stub that writes the code to the server log. With
+  `DEBUG=true` (never in production) responses also include `dev_otp`.
+- **Refresh token**: random, 7 days, single use. Every refresh returns a new one.
   Only its SHA-256 hash is stored. Re-using an old one is treated as theft and ends
   that device's session. **Clients must never run two refreshes at the same time.**
-- **Brute force**: 5 wrong passwords lock that email for 15 minutes (429 + `Retry-After`).
+- **Brute force**: 5 wrong passwords lock that account for 15 minutes, whether you use its
+  email or mobile (429 + `Retry-After`).
+- **Account status**: `pending_verification`, `active` or `blocked` (403 `account_disabled`).
+- **Roles**: `customer` (default), `merchant`, `admin`. Protect a route with
+  `Depends(require_roles(UserRole.ADMIN))` from `app.modules.auth.dependencies`.
 - Mobile numbers are accepted as `9876543210`, `+91 98765 43210`, etc. and stored as `+919876543210`.
 - Passwords: 8+ characters, at least one letter and one number, at most 72 bytes.
 

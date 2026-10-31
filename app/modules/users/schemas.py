@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 
+from app.common.enums import UserRole, UserStatus
 from app.common.schemas import RequestModel, ResponseModel
 from app.common.validators import FullName
 
@@ -10,6 +11,8 @@ class UserRead(ResponseModel):
     email: str
     phone: str
     full_name: str
+    role: UserRole
+    status: UserStatus
     created_at: datetime
 
 

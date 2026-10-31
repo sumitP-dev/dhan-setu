@@ -4,7 +4,8 @@ from datetime import datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.auth.models import RefreshToken
+from app.common.enums import OtpPurpose
+from app.modules.auth.models import OtpCode, RefreshToken
 
 
 class RefreshTokenRepository:
@@ -55,3 +56,63 @@ class RefreshTokenRepository:
             .values(revoked_at=now)
             .execution_options(synchronize_session=False)
         )
+
+
+class OtpRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, otp: OtpCode) -> OtpCode:
+        self._session.add(otp)
+        await self._session.flush()
+        return otp
+
+    async def get_active(self, phone: str, purpose: OtpPurpose, *, now: datetime) -> OtpCode | None:
+        """The newest unused, unexpired code for this phone and purpose."""
+        return await self._session.scalar(
+            select(OtpCode)
+            .where(
+                OtpCode.phone == phone,
+                OtpCode.purpose == purpose,
+                OtpCode.consumed_at.is_(None),
+                OtpCode.expires_at > now,
+            )
+            .order_by(OtpCode.created_at.desc())
+            .limit(1)
+        )
+
+    async def invalidate_active(self, phone: str, purpose: OtpPurpose, *, now: datetime) -> None:
+        """Retire older codes when a new one is sent, so only the latest works."""
+        await self._session.execute(
+            update(OtpCode)
+            .where(
+                OtpCode.phone == phone,
+                OtpCode.purpose == purpose,
+                OtpCode.consumed_at.is_(None),
+            )
+            .values(consumed_at=now)
+            .execution_options(synchronize_session=False)
+        )
+
+    async def record_attempt(self, otp_id: uuid.UUID, *, max_attempts: int) -> bool:
+        """Count one guess. A single conditional UPDATE, so parallel guesses can't exceed
+        the limit. Returns False once the limit is used up."""
+        result = await self._session.execute(
+            update(OtpCode)
+            .where(OtpCode.id == otp_id, OtpCode.attempts < max_attempts)
+            .values(attempts=OtpCode.attempts + 1)
+            .returning(OtpCode.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def consume(self, otp_id: uuid.UUID, *, now: datetime) -> bool:
+        """Mark the code used. Returns False if a parallel request already used it."""
+        result = await self._session.execute(
+            update(OtpCode)
+            .where(OtpCode.id == otp_id, OtpCode.consumed_at.is_(None))
+            .values(consumed_at=now)
+            .returning(OtpCode.id)
+            .execution_options(synchronize_session=False)
+        )
+        return result.scalar_one_or_none() is not None

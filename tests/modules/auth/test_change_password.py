@@ -2,7 +2,7 @@ from typing import Any
 
 from httpx import AsyncClient, Response
 
-from tests.helpers import TEST_PASSWORD, bearer, register
+from tests.helpers import TEST_PASSWORD, bearer, login, register
 
 
 async def _change(client: AsyncClient, access_token: str, current: str, new: str) -> Response:
@@ -14,9 +14,7 @@ async def _change(client: AsyncClient, access_token: str, current: str, new: str
 
 
 async def _login(client: AsyncClient, password: str) -> Response:
-    return await client.post(
-        "/api/v1/auth/login", json={"email": "asha@example.com", "password": password}
-    )
+    return await login(client, password=password)
 
 
 async def test_change_password(client: AsyncClient) -> None:

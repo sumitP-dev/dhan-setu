@@ -1,3 +1,4 @@
+import contextlib
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -5,28 +6,49 @@ from datetime import timedelta
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.common.exceptions import BadRequestError, ConflictError, ForbiddenError, UnauthorizedError
+from app.common.enums import OtpPurpose, UserStatus
+from app.common.exceptions import (
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    TooManyRequestsError,
+    UnauthorizedError,
+)
+from app.common.validators import is_phone_identifier
 from app.core.config import Settings
 from app.core.database import utcnow
-from app.core.rate_limit import AttemptLimiter
+from app.core.rate_limit import AttemptLimiter, Cooldown
 from app.core.security import (
     burn_password_check,
     create_access_token,
+    generate_otp,
     generate_refresh_token,
+    hash_otp,
     hash_password,
     hash_refresh_token,
+    otp_matches,
     verify_password,
 )
-from app.modules.auth.models import RefreshToken
-from app.modules.auth.repository import RefreshTokenRepository
+from app.modules.auth.models import MAX_DEVICE_INFO_LENGTH, OtpCode, RefreshToken
+from app.modules.auth.repository import OtpRepository, RefreshTokenRepository
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
     LoginRequest,
+    OtpSendRequest,
+    OtpSentResponse,
+    OtpVerifyRequest,
     RegisterRequest,
     TokenPair,
 )
+from app.modules.notifications.service import SmsSender
 from app.modules.users.models import User
 from app.modules.users.repository import UserRepository
+
+# Which account status may receive each kind of OTP.
+_OTP_ELIGIBLE_STATUS = {
+    OtpPurpose.VERIFY_PHONE: UserStatus.PENDING_VERIFICATION,
+    OtpPurpose.LOGIN: UserStatus.ACTIVE,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,38 +57,68 @@ class AuthResult:
     tokens: TokenPair
 
 
+@dataclass(frozen=True, slots=True)
+class RegisterResult:
+    user: User
+    otp: OtpSentResponse
+
+
 def _invalid_credentials() -> UnauthorizedError:
-    # Same error for unknown email and wrong password, so it can't reveal which emails exist.
-    return UnauthorizedError("Invalid email or password", code="invalid_credentials")
+    # Same error for unknown account and wrong password, so it can't reveal who is registered.
+    return UnauthorizedError("Invalid email/mobile or password", code="invalid_credentials")
 
 
 def _invalid_refresh_token() -> UnauthorizedError:
     return UnauthorizedError("Invalid or expired refresh token", code="invalid_refresh_token")
 
 
-def _account_disabled() -> ForbiddenError:
+def _invalid_otp() -> BadRequestError:
+    return BadRequestError("Invalid or expired code", code="invalid_otp")
+
+
+def account_disabled() -> ForbiddenError:
     return ForbiddenError("This account is disabled", code="account_disabled")
 
 
+def phone_not_verified() -> ForbiddenError:
+    return ForbiddenError("Verify your mobile number to continue", code="phone_not_verified")
+
+
+def ensure_can_sign_in(user: User) -> None:
+    if user.status == UserStatus.BLOCKED:
+        raise account_disabled()
+    if user.status == UserStatus.PENDING_VERIFICATION:
+        raise phone_not_verified()
+
+
 class AuthService:
-    def __init__(
+    def __init__(  # noqa: PLR0913  (all keyword-only dependencies)
         self,
         *,
         session: AsyncSession,
         users: UserRepository,
         refresh_tokens: RefreshTokenRepository,
+        otps: OtpRepository,
+        sms: SmsSender,
         settings: Settings,
         login_limiter: AttemptLimiter,
         password_change_limiter: AttemptLimiter,
+        otp_cooldown: Cooldown,
     ) -> None:
         self._session = session
         self._users = users
         self._refresh_tokens = refresh_tokens
+        self._otps = otps
+        self._sms = sms
         self._settings = settings
         self._login_limiter = login_limiter
         self._password_change_limiter = password_change_limiter
+        self._otp_cooldown = otp_cooldown
 
-    async def register(self, data: RegisterRequest) -> AuthResult:
+    # ---- Registration and OTP
+
+    async def register(self, data: RegisterRequest) -> RegisterResult:
+        """Creates a pending account and texts a verify_phone OTP. No tokens until verified."""
         if await self._users.email_exists(data.email):
             raise ConflictError("This email is already registered", code="email_taken")
         if await self._users.phone_exists(data.phone):
@@ -86,27 +138,86 @@ class AuthService:
                 "An account with these details already exists", code="account_exists"
             ) from exc
 
-        return AuthResult(user=user, tokens=await self._issue_tokens(user.id))
+        # Start the resend timer. If someone already requested a code for this number,
+        # registration still goes ahead (the account didn't exist then).
+        with contextlib.suppress(TooManyRequestsError):
+            await self._otp_cooldown.start(self._cooldown_key(user.phone, OtpPurpose.VERIFY_PHONE))
+        code = await self._issue_otp(user.phone, OtpPurpose.VERIFY_PHONE)
+        return RegisterResult(user=user, otp=self._otp_sent(code))
 
-    async def login(self, data: LoginRequest) -> AuthResult:
-        await self._login_limiter.ensure_allowed(data.email)
+    async def send_otp(self, data: OtpSendRequest) -> OtpSentResponse:
+        """Always answers the same way, whether or not the number is registered, so this
+        endpoint can't be used to discover which numbers have accounts. A code is only
+        actually sent when the account is in the right state for the purpose."""
+        await self._otp_cooldown.start(self._cooldown_key(data.phone, data.purpose))
 
-        user = await self._users.get_by_email(data.email)
+        user = await self._users.get_by_phone(data.phone)
+        if user is None or user.status != _OTP_ELIGIBLE_STATUS[data.purpose]:
+            return self._otp_sent(None)
+        code = await self._issue_otp(data.phone, data.purpose)
+        return self._otp_sent(code)
+
+    async def verify_otp(self, data: OtpVerifyRequest, *, device_info: str | None) -> AuthResult:
+        """verify_phone activates the account; both purposes sign the user in."""
+        now = utcnow()
+        otp = await self._otps.get_active(data.phone, data.purpose, now=now)
+        if otp is None:
+            raise _invalid_otp()
+
+        if not await self._otps.record_attempt(
+            otp.id, max_attempts=self._settings.otp_max_attempts
+        ):
+            raise TooManyRequestsError(
+                "Too many wrong codes. Request a new one.", code="otp_attempts_exceeded"
+            )
+        secret = self._settings.jwt_secret_key
+        if not otp_matches(
+            data.code, otp.code_hash, phone=data.phone, purpose=data.purpose, secret=secret
+        ):
+            # Commit now: the request is about to fail, and a failing request is rolled
+            # back, which would undo the attempt count.
+            await self._session.commit()
+            raise _invalid_otp()
+        if not await self._otps.consume(otp.id, now=now):
+            raise _invalid_otp()  # used by a parallel request
+
+        user = await self._users.get_by_phone(data.phone)
+        if user is None:
+            raise _invalid_otp()
+        if data.purpose == OtpPurpose.VERIFY_PHONE and (
+            user.status == UserStatus.PENDING_VERIFICATION
+        ):
+            user.status = UserStatus.ACTIVE
+        ensure_can_sign_in(user)
+        return await self._sign_in(user, device_info=device_info)
+
+    # ---- Password login and sessions
+
+    async def login(self, data: LoginRequest, *, device_info: str | None) -> AuthResult:
+        if is_phone_identifier(data.identifier):
+            user = await self._users.get_by_phone(data.identifier)
+        else:
+            user = await self._users.get_by_email(data.identifier)
+
+        # Count failures per account, so switching between email and phone doesn't give
+        # extra guesses. Unknown identifiers are counted too, so they look the same.
+        limiter_key = str(user.id) if user else data.identifier
+        await self._login_limiter.ensure_allowed(limiter_key)
+
         if user is None:
             await burn_password_check(data.password, rounds=self._settings.bcrypt_rounds)
-            await self._login_limiter.record_failure(data.email)
+            await self._login_limiter.record_failure(limiter_key)
             raise _invalid_credentials()
         if not await verify_password(data.password, user.password_hash):
-            await self._login_limiter.record_failure(data.email)
+            await self._login_limiter.record_failure(limiter_key)
             raise _invalid_credentials()
 
-        await self._login_limiter.reset(data.email)
+        await self._login_limiter.reset(limiter_key)
         # Checked only after the password, so it doesn't reveal that the account exists.
-        if not user.is_active:
-            raise _account_disabled()
-        return AuthResult(user=user, tokens=await self._issue_tokens(user.id))
+        ensure_can_sign_in(user)
+        return await self._sign_in(user, device_info=device_info)
 
-    async def refresh(self, refresh_token: str) -> TokenPair:
+    async def refresh(self, refresh_token: str, *, device_info: str | None) -> TokenPair:
         now = utcnow()
         token_hash = hash_refresh_token(refresh_token)
 
@@ -118,9 +229,10 @@ class AuthService:
         user = await self._users.get_by_id(consumed.user_id)
         if user is None:
             raise _invalid_refresh_token()
-        if not user.is_active:
-            raise _account_disabled()
-        return await self._issue_tokens(user.id, family_id=consumed.family_id)
+        ensure_can_sign_in(user)
+        return await self._issue_tokens(
+            user.id, family_id=consumed.family_id, device_info=device_info
+        )
 
     async def logout(self, refresh_token: str) -> None:
         """Ends the session on this device. Unknown or already-revoked tokens are ignored,
@@ -129,7 +241,9 @@ class AuthService:
         if token is not None:
             await self._refresh_tokens.revoke_family(token.family_id, now=utcnow())
 
-    async def change_password(self, user: User, data: ChangePasswordRequest) -> TokenPair:
+    async def change_password(
+        self, user: User, data: ChangePasswordRequest, *, device_info: str | None
+    ) -> TokenPair:
         """Signs out every other device and returns fresh tokens for this one."""
         limiter_key = str(user.id)
         await self._password_change_limiter.ensure_allowed(limiter_key)
@@ -148,7 +262,45 @@ class AuthService:
         )
         await self._users.save(user)
         await self._refresh_tokens.revoke_all_for_user(user.id, now=utcnow())
-        return await self._issue_tokens(user.id)
+        return await self._issue_tokens(user.id, device_info=device_info)
+
+    # ---- Helpers
+
+    @staticmethod
+    def _cooldown_key(phone: str, purpose: OtpPurpose) -> str:
+        return f"{purpose}:{phone}"
+
+    async def _issue_otp(self, phone: str, purpose: OtpPurpose) -> str:
+        now = utcnow()
+        code = generate_otp()
+        await self._otps.invalidate_active(phone, purpose, now=now)
+        await self._otps.add(
+            OtpCode(
+                phone=phone,
+                purpose=purpose,
+                code_hash=hash_otp(
+                    code, phone=phone, purpose=purpose, secret=self._settings.jwt_secret_key
+                ),
+                expires_at=now + timedelta(minutes=self._settings.otp_ttl_minutes),
+            )
+        )
+        await self._sms.send_otp(phone, code, purpose)
+        return code
+
+    def _otp_sent(self, code: str | None) -> OtpSentResponse:
+        return OtpSentResponse(
+            message="If this number can receive a code, it has been sent.",
+            expires_in=self._settings.otp_ttl_minutes * 60,
+            resend_after=self._settings.otp_resend_cooldown_seconds,
+            dev_otp=code if self._settings.expose_dev_otp else None,
+        )
+
+    async def _sign_in(self, user: User, *, device_info: str | None) -> AuthResult:
+        user.last_login_at = utcnow()
+        await self._users.save(user)
+        return AuthResult(
+            user=user, tokens=await self._issue_tokens(user.id, device_info=device_info)
+        )
 
     async def _handle_unusable_refresh_token(self, token_hash: str) -> None:
         """A refresh token that exists but was already used means it was probably copied
@@ -161,7 +313,11 @@ class AuthService:
         await self._session.commit()
 
     async def _issue_tokens(
-        self, user_id: uuid.UUID, *, family_id: uuid.UUID | None = None
+        self,
+        user_id: uuid.UUID,
+        *,
+        family_id: uuid.UUID | None = None,
+        device_info: str | None = None,
     ) -> TokenPair:
         now = utcnow()
         access_ttl = timedelta(minutes=self._settings.access_token_ttl_minutes)
@@ -173,6 +329,7 @@ class AuthService:
                 family_id=family_id or uuid.uuid4(),
                 token_hash=hash_refresh_token(refresh_token),
                 expires_at=now + timedelta(days=self._settings.refresh_token_ttl_days),
+                device_info=device_info[:MAX_DEVICE_INFO_LENGTH] if device_info else None,
             )
         )
         return TokenPair(

@@ -14,7 +14,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.config import Settings
 from app.main import create_app
 from app.models import Base
-from tests.helpers import TEST_DATABASE_URL, FakeRedis, make_settings
+from tests.helpers import TEST_DATABASE_URL, FakeRedis, FakeSmsSender, make_settings
 
 
 @pytest.fixture
@@ -48,12 +48,20 @@ def fake_redis() -> FakeRedis:
 
 
 @pytest.fixture
-def app(settings: Settings, engine: AsyncEngine, fake_redis: FakeRedis) -> FastAPI:
+def sms() -> FakeSmsSender:
+    return FakeSmsSender()
+
+
+@pytest.fixture
+def app(
+    settings: Settings, engine: AsyncEngine, fake_redis: FakeRedis, sms: FakeSmsSender
+) -> FastAPI:
     app = create_app(settings)
     # Swap in test resources; the real get_db/get_redis dependencies still run.
     app.state.engine = engine
     app.state.session_factory = async_sessionmaker(engine, expire_on_commit=False)
     app.state.redis = fake_redis
+    app.state.sms_sender = sms
     return app
 
 
