@@ -2,12 +2,17 @@ from functools import lru_cache
 from typing import Annotated, Literal
 
 from fastapi import Depends, Request
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 MIN_JWT_SECRET_LENGTH = 32
+MIN_WEBHOOK_SECRET_LENGTH = 16
+RAZORPAY_TEST_KEY_PREFIX = "rzp_test_"
+RAZORPAY_LIVE_KEY_PREFIX = "rzp_live_"
 
 Environment = Literal["local", "test", "staging", "production"]
+# "fake" settles payments in memory with no real money. Refused in production.
+PaymentGatewayName = Literal["razorpay", "fake"]
 
 
 class Settings(BaseSettings):
@@ -44,6 +49,19 @@ class Settings(BaseSettings):
     otp_max_attempts: int = Field(default=5, gt=0)
     otp_resend_cooldown_seconds: int = Field(default=30, gt=0)
 
+    # Payments
+    payment_gateway: PaymentGatewayName = "fake"
+    # The key id is public (the app sends it to Razorpay checkout); the secrets are not.
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: SecretStr | None = None
+    razorpay_webhook_secret: SecretStr | None = None
+    razorpay_timeout_seconds: float = Field(default=10, gt=0, le=30)
+
+    # Cards. Each new card is checked with a ₹1 charge that is refunded straight away.
+    # Small test charges are how stolen cards get tried, so new checks are capped per user.
+    card_verifications_per_day: int = Field(default=5, gt=0, le=50)
+    max_cards_per_user: int = Field(default=10, gt=0, le=50)
+
     @field_validator("jwt_secret_key")
     @classmethod
     def _jwt_secret_long_enough(cls, value: SecretStr) -> SecretStr:
@@ -51,6 +69,37 @@ class Settings(BaseSettings):
             msg = f"must be at least {MIN_JWT_SECRET_LENGTH} characters"
             raise ValueError(msg)
         return value
+
+    @model_validator(mode="after")
+    def _payment_gateway_is_safe(self) -> "Settings":
+        """Refuse to start with a payment setup that could lose or fake money."""
+        is_production = self.environment == "production"
+        if self.payment_gateway == "fake":
+            if is_production:
+                msg = "PAYMENT_GATEWAY=fake is not allowed in production"
+                raise ValueError(msg)
+            return self
+
+        key_id = self.razorpay_key_id or ""
+        key_secret = self.razorpay_key_secret.get_secret_value() if self.razorpay_key_secret else ""
+        webhook_secret = (
+            self.razorpay_webhook_secret.get_secret_value() if self.razorpay_webhook_secret else ""
+        )
+        if not key_id or not key_secret or not webhook_secret:
+            msg = (
+                "PAYMENT_GATEWAY=razorpay needs RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET "
+                "and RAZORPAY_WEBHOOK_SECRET"
+            )
+            raise ValueError(msg)
+        if len(webhook_secret) < MIN_WEBHOOK_SECRET_LENGTH:
+            msg = f"RAZORPAY_WEBHOOK_SECRET must be at least {MIN_WEBHOOK_SECRET_LENGTH} characters"
+            raise ValueError(msg)
+        # Live keys move real money: only production may use them, and production must.
+        expected_prefix = RAZORPAY_LIVE_KEY_PREFIX if is_production else RAZORPAY_TEST_KEY_PREFIX
+        if not key_id.startswith(expected_prefix):
+            msg = f"RAZORPAY_KEY_ID must start with {expected_prefix} in {self.environment}"
+            raise ValueError(msg)
+        return self
 
     @property
     def docs_enabled(self) -> bool:

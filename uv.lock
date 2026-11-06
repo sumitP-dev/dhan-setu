@@ -192,6 +192,7 @@ dependencies = [
     { name = "bcrypt" },
     { name = "email-validator" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt" },
@@ -203,7 +204,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "aiosqlite" },
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -217,6 +217,7 @@ requires-dist = [
     { name = "bcrypt", specifier = ">=5.0" },
     { name = "email-validator", specifier = ">=2.3" },
     { name = "fastapi", specifier = ">=0.162" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic", specifier = ">=2.14" },
     { name = "pydantic-settings", specifier = ">=2.16" },
     { name = "pyjwt", specifier = ">=2.15" },
@@ -228,7 +229,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "aiosqlite", specifier = ">=0.22" },
-    { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", specifier = ">=2.4" },
     { name = "pytest", specifier = ">=9.2" },
     { name = "pytest-asyncio", specifier = ">=1.4" },

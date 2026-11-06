@@ -10,6 +10,7 @@ dependencies = [
     "bcrypt>=5.0",
     "email-validator>=2.3",
     "fastapi>=0.162",
+    "httpx>=0.28",
     "pydantic>=2.14",
     "pydantic-settings>=2.16",
     "pyjwt>=2.15",
@@ -21,7 +22,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "aiosqlite>=0.22",
-    "httpx>=0.28",
     "mypy>=2.4",
     "pytest>=9.2",
     "pytest-asyncio>=1.4",

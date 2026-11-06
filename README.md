@@ -141,6 +141,12 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/api/v1/auth/change-password` | Bearer | Change password, signs out other devices |
 | GET | `/api/v1/users/me` | Bearer | Current user's profile |
 | PATCH | `/api/v1/users/me` | Bearer | Update full name |
+| GET | `/api/v1/cards` | Bearer | Saved cards, default first |
+| POST | `/api/v1/cards/verifications` | Bearer + `Idempotency-Key` | Start adding a card: ₹1 order + checkout options |
+| POST | `/api/v1/cards/verifications/{id}/complete` | Bearer | Send checkout's payment id + signature: saves the card, refunds ₹1 |
+| GET | `/api/v1/cards/verifications/{id}` | Bearer | Status of a card check |
+| PATCH | `/api/v1/cards/{id}/default` | Bearer | Make a card the default |
+| DELETE | `/api/v1/cards/{id}` | Bearer | Remove a card (and its token at the gateway) |
 
 ### How auth works
 
@@ -164,6 +170,34 @@ Full interactive docs: http://localhost:8000/docs
   `Depends(require_roles(UserRole.ADMIN))` from `app.modules.auth.dependencies`.
 - Mobile numbers are accepted as `9876543210`, `+91 98765 43210`, etc. and stored as `+919876543210`.
 - Passwords: 8+ characters, at least one letter and one number, at most 72 bytes.
+
+### Payment gateway
+
+`PAYMENT_GATEWAY` in `.env` picks the gateway (code in `app/modules/payments/gateway/`):
+
+- `fake` (default): settles payments in memory, no keys or internet needed. Tests always use it.
+  The app refuses to start with it in production.
+- `razorpay`: needs `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`.
+  Only `rzp_test_` keys are accepted outside production, and only `rzp_live_` keys in production.
+
+Card numbers and CVVs never reach this server: users type them into Razorpay's checkout.
+
+### How adding a card works
+
+1. `POST /cards/verifications` creates a ₹1 order. The app opens Razorpay checkout with the
+   returned `checkout` options and `save: 1`.
+2. `POST /cards/verifications/{id}/complete` with checkout's payment id and signature. The
+   server checks the signature, then asks Razorpay for the payment and its saved card. Card
+   details always come from Razorpay, never from the app.
+3. The card is saved (credit/debit, not expired) and the ₹1 refunded straight away.
+   Only saved cards can be used to pay.
+
+- `status`: `created` -> `verified` or `failed` (`failure_code` + `failure_message` say why).
+  `charged` means the ₹1 was taken but Razorpay didn't answer while saving: call
+  `/complete` again. Completing again is always safe.
+- Limits: 5 card checks per user per day, 10 saved cards (`CARD_VERIFICATIONS_PER_DAY`,
+  `MAX_CARDS_PER_USER`). Small test charges are how stolen cards get tried.
+- If a refund can't be confirmed it stays `pending` for the reconciliation job (Prompt 10).
 
 ## Rules
 

@@ -124,3 +124,45 @@ Content-Type: application/json
   "purpose": "login",
   "code": "{{otp}}"
 }
+
+
+### ---- Cards (log in with step 4 first). A card is saved only after a ₹1 check.
+
+### C1. Saved cards (default first)
+GET {{baseUrl}}/cards
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### C2. Start adding a card: creates a ₹1 order. Use a NEW Idempotency-Key for each new card.
+# @name cardCheck
+POST {{baseUrl}}/cards/verifications
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+Idempotency-Key: {{$guid}}
+
+
+### C3. Finish: send what Razorpay checkout returned (razorpay_payment_id, razorpay_signature).
+# Needs PAYMENT_GATEWAY=razorpay and a real test-mode checkout; the mobile app does this.
+POST {{baseUrl}}/cards/verifications/{{cardCheck.response.body.$.id}}/complete
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+Content-Type: application/json
+
+{
+  "payment_id": "pay_REPLACE_ME",
+  "signature": "REPLACE_WITH_64_HEX_CHARS"
+}
+
+
+### C4. Status of a card check
+GET {{baseUrl}}/cards/verifications/{{cardCheck.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### C5. Make a card the default (set @cardId first)
+@cardId = 00000000-0000-0000-0000-000000000000
+PATCH {{baseUrl}}/cards/{{cardId}}/default
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### C6. Remove a card (also deletes it at Razorpay)
+DELETE {{baseUrl}}/cards/{{cardId}}
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
