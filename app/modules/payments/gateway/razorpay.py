@@ -243,11 +243,22 @@ class RazorpayGateway:
             logger.error("Unexpected Razorpay response for %s: %s", model.__name__, exc)
             raise PaymentGatewayError from None
 
-    def _to_payment(self, body: dict[str, Any], expected_id: str) -> GatewayPayment:
+    def _to_payment(
+        self,
+        body: dict[str, Any],
+        *,
+        expected_id: str | None = None,
+        expected_order_id: str | None = None,
+    ) -> GatewayPayment:
         payment = self._parse(_Payment, body)
-        if payment.id != expected_id or not payment.order_id:
-            logger.error("Razorpay returned payment %s for %s", payment.id, expected_id)
+        if (
+            (expected_id is not None and payment.id != expected_id)
+            or not payment.order_id
+            or (expected_order_id is not None and payment.order_id != expected_order_id)
+        ):
+            logger.error("Razorpay returned payment %s, which isn't the one asked for", payment.id)
             raise PaymentGatewayError
+        _response_id(payment.id, "pay")
         return GatewayPayment(
             id=payment.id,
             order_id=payment.order_id,
@@ -307,7 +318,18 @@ class RazorpayGateway:
     async def fetch_payment(self, payment_id: str) -> GatewayPayment:
         require_gateway_id(payment_id, "pay")
         body = await self._request("GET", f"/payments/{payment_id}", params={"expand[]": "card"})
-        return self._to_payment(body, payment_id)
+        return self._to_payment(body, expected_id=payment_id)
+
+    async def fetch_order_payments(self, order_id: str) -> list[GatewayPayment]:
+        require_gateway_id(order_id, "order")
+        body = await self._request(
+            "GET", f"/orders/{order_id}/payments", params={"expand[]": "card"}
+        )
+        items = body.get("items")
+        if not isinstance(items, list) or not all(isinstance(item, dict) for item in items):
+            logger.error("Unexpected Razorpay response listing payments of %s", order_id)
+            raise PaymentGatewayError
+        return [self._to_payment(item, expected_order_id=order_id) for item in items]
 
     async def capture_payment(self, payment_id: str, amount_paise: int) -> GatewayPayment:
         require_gateway_id(payment_id, "pay")
@@ -316,7 +338,7 @@ class RazorpayGateway:
             f"/payments/{payment_id}/capture",
             json={"amount": amount_paise, "currency": Currency.INR.value},
         )
-        return self._to_payment(body, payment_id)
+        return self._to_payment(body, expected_id=payment_id)
 
     async def refund_payment(
         self, payment_id: str, amount_paise: int, *, receipt: str
@@ -337,6 +359,18 @@ class RazorpayGateway:
             payment_id=payment_id,
             amount_paise=refund.amount,
             status=refund.status,
+        )
+
+    async def fetch_refund(self, payment_id: str, refund_id: str) -> GatewayRefund:
+        require_gateway_id(payment_id, "pay")
+        require_gateway_id(refund_id, "rfnd")
+        body = await self._request("GET", f"/payments/{payment_id}/refunds/{refund_id}")
+        refund = self._parse(_Refund, body)
+        if refund.id != refund_id or refund.payment_id != payment_id:
+            logger.error("Razorpay returned refund %s for %s", refund.id, refund_id)
+            raise PaymentGatewayError
+        return GatewayRefund(
+            id=refund.id, payment_id=payment_id, amount_paise=refund.amount, status=refund.status
         )
 
     async def fetch_card_token(self, customer_id: str, token_id: str) -> GatewayCardToken:

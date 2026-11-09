@@ -11,6 +11,7 @@ from app.common.enums import (
     RefundStatus,
 )
 from app.common.schemas import RequestModel, ResponseModel
+from app.modules.payments.schemas import CheckoutOptions
 
 
 class CardRead(ResponseModel):
@@ -25,21 +26,13 @@ class CardRead(ResponseModel):
     created_at: datetime
 
 
-class CheckoutOptions(ResponseModel):
-    """Pass these to Razorpay checkout, with save: 1 so the card is saved."""
-
-    key_id: str
-    order_id: str
-    customer_id: str
-
-
 class CardVerificationStarted(ResponseModel):
     id: uuid.UUID
     status: CardVerificationStatus
     amount_paise: int = Field(description="Charged and refunded straight away.")
     currency: Currency = Currency.INR
     expires_at: datetime
-    checkout: CheckoutOptions
+    checkout: CheckoutOptions = Field(description="Open checkout with these and save: 1.")
 
 
 class CardVerificationComplete(RequestModel):

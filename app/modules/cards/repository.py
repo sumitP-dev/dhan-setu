@@ -89,6 +89,25 @@ class CardVerificationRepository:
             query = query.with_for_update()
         return await self._session.scalar(query)
 
+    async def get_by_order_id(
+        self, order_id: str, *, for_update: bool = False
+    ) -> CardVerification | None:
+        """For webhooks, which have no user."""
+        query = select(CardVerification).where(CardVerification.gateway_order_id == order_id)
+        if for_update:
+            query = query.with_for_update()
+        return await self._session.scalar(query)
+
+    async def get_by_gateway_payment_id(
+        self, gateway_payment_id: str, *, for_update: bool = False
+    ) -> CardVerification | None:
+        query = select(CardVerification).where(
+            CardVerification.gateway_payment_id == gateway_payment_id
+        )
+        if for_update:
+            query = query.with_for_update()
+        return await self._session.scalar(query)
+
     async def count_since(self, user_id: uuid.UUID, since: datetime) -> int:
         count = await self._session.scalar(
             select(func.count())

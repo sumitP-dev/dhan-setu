@@ -154,6 +154,10 @@ class PaymentGateway(Protocol):
 
     async def fetch_payment(self, payment_id: str) -> GatewayPayment: ...
 
+    async def fetch_order_payments(self, order_id: str) -> list[GatewayPayment]:
+        """Every payment attempt on the order (a user can retry after a failure)."""
+        ...
+
     async def capture_payment(self, payment_id: str, amount_paise: int) -> GatewayPayment: ...
 
     async def refund_payment(
@@ -161,6 +165,8 @@ class PaymentGateway(Protocol):
     ) -> GatewayRefund:
         """Not retried here: on a timeout the refund may or may not exist."""
         ...
+
+    async def fetch_refund(self, payment_id: str, refund_id: str) -> GatewayRefund: ...
 
     async def fetch_card_token(self, customer_id: str, token_id: str) -> GatewayCardToken: ...
 

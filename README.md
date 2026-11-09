@@ -147,6 +147,10 @@ Full interactive docs: http://localhost:8000/docs
 | GET | `/api/v1/cards/verifications/{id}` | Bearer | Status of a card check |
 | PATCH | `/api/v1/cards/{id}/default` | Bearer | Make a card the default |
 | DELETE | `/api/v1/cards/{id}` | Bearer | Remove a card (and its token at the gateway) |
+| POST | `/api/v1/payments/orders` | Bearer + `Idempotency-Key` | Start a payment with a saved card: order + checkout options |
+| POST | `/api/v1/payments/{id}/verify` | Bearer | Send checkout's payment id + signature |
+| GET | `/api/v1/payments/{id}` | Bearer | Payment status; checks with the gateway while unsettled |
+| POST | `/api/v1/webhooks/razorpay` | `X-Razorpay-Signature` | Razorpay events (called by Razorpay, not the app) |
 
 ### How auth works
 
@@ -198,6 +202,45 @@ Card numbers and CVVs never reach this server: users type them into Razorpay's c
 - Limits: 5 card checks per user per day, 10 saved cards (`CARD_VERIFICATIONS_PER_DAY`,
   `MAX_CARDS_PER_USER`). Small test charges are how stolen cards get tried.
 - If a refund can't be confirmed it stays `pending` for the reconciliation job (Prompt 10).
+
+### How a card payment works
+
+1. `POST /payments/orders` with `amount_paise` (whole paise, at least 100) and a saved
+   `card_id`, plus an `Idempotency-Key`. The same key and body return the same payment;
+   the same key with a different body is refused (409 `idempotency_key_reused`).
+2. The app opens Razorpay checkout with the returned `checkout` options.
+3. `POST /payments/{id}/verify` with checkout's payment id and signature. The server checks
+   the signature against the stored order and asks Razorpay for the payment.
+4. Only the chosen saved card is accepted. A payment made with any other card is never
+   captured, or refunded if it already was (`failure_code: card_not_allowed`).
+5. While a payment is unsettled, `GET /payments/{id}` checks with Razorpay (at most every
+   `PAYMENT_SYNC_INTERVAL_SECONDS`), so it settles even if the app closed before verifying.
+
+Statuses: `created -> pending -> success -> refunded`, and `created/pending -> failed`.
+`failed -> pending` is allowed because a user can retry on the same order in checkout.
+Every change is recorded in `payment_events`. Unpaid payments fail after
+`PAYMENT_EXPIRY_MINUTES`. Single payments are capped at `MAX_PAYMENT_AMOUNT_PAISE`.
+
+### Razorpay webhook
+
+Razorpay calls `POST /api/v1/webhooks/razorpay` when payments and refunds change, so
+payments and card checks finish even if the app closed before verifying.
+
+- The `X-Razorpay-Signature` header (HMAC of the raw body with `RAZORPAY_WEBHOOK_SECRET`) must
+  match, or the request is refused (400). Bodies over 256 KB are refused (413).
+- A webhook is only a trigger: amounts and statuses in it are never used. The server asks
+  Razorpay for the order or refund and applies that, with the same code as verify and polling.
+- Each event is handled once: duplicates are recognised by event id and by a hash of the body
+  (the event id isn't signed, so a replayed body under a new id is still a duplicate).
+- If Razorpay can't be reached while handling, the response is 503 and nothing is recorded,
+  so Razorpay's retry is handled normally. Signed but unusable events get 200 and are kept in
+  `webhook_events` as `failed`. Payloads aren't stored (they hold customer details).
+- Events used: `payment.authorized`, `payment.captured`, `payment.failed`, `order.paid`,
+  `refund.created`, `refund.processed`, `refund.failed`.
+
+To receive webhooks locally, Razorpay needs a public URL: run a tunnel (e.g. `ngrok http 8000`)
+and add `https://<tunnel>/api/v1/webhooks/razorpay` in Dashboard (Test Mode) -> Webhooks, with
+the same secret as `RAZORPAY_WEBHOOK_SECRET`. Without webhooks, polling still settles payments.
 
 ## Rules
 

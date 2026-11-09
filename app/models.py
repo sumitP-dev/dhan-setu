@@ -3,8 +3,9 @@
 from app.core.database import Base
 from app.modules.auth.models import OtpCode, RefreshToken
 from app.modules.cards.models import Card, CardVerification
-from app.modules.payments.models import GatewayCustomer
+from app.modules.payments.models import GatewayCustomer, Payment, PaymentEvent
 from app.modules.users.models import User
+from app.modules.webhooks.models import WebhookEvent
 
 __all__ = [
     "Base",
@@ -12,6 +13,9 @@ __all__ = [
     "CardVerification",
     "GatewayCustomer",
     "OtpCode",
+    "Payment",
+    "PaymentEvent",
     "RefreshToken",
     "User",
+    "WebhookEvent",
 ]

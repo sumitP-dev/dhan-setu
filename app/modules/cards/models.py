@@ -63,6 +63,11 @@ class Card(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return f"Card(id={self.id!s}, last4={self.last4!r})"
 
 
+def card_expired(expiry_month: int, expiry_year: int, now: datetime) -> bool:
+    """A card works until the end of its expiry month."""
+    return (expiry_year, expiry_month) < (now.year, now.month)
+
+
 class CardVerification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """One ₹1 check of a new card: the order, the payment, its refund and the result."""
 

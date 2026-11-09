@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     card_verifications_per_day: int = Field(default=5, gt=0, le=50)
     max_cards_per_user: int = Field(default=10, gt=0, le=50)
 
+    # Payments. Amounts are integer paise (₹1 = 100).
+    max_payment_amount_paise: int = Field(default=1_00_000_00, ge=100)  # ₹1,00,000
+    # Unpaid payments become failed after this long.
+    payment_expiry_minutes: int = Field(default=30, gt=0)
+    # Polling a payment checks with the gateway at most this often.
+    payment_sync_interval_seconds: int = Field(default=5, gt=0)
+
     @field_validator("jwt_secret_key")
     @classmethod
     def _jwt_secret_long_enough(cls, value: SecretStr) -> SecretStr:

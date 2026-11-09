@@ -11,10 +11,10 @@ from app.modules.cards.schemas import (
     CardVerificationComplete,
     CardVerificationRead,
     CardVerificationStarted,
-    CheckoutOptions,
 )
 from app.modules.cards.service import FAILURE_MESSAGES, VerificationResult
 from app.modules.payments.dependencies import PaymentGatewayDep
+from app.modules.payments.schemas import CheckoutOptions
 
 router = APIRouter(
     prefix="/cards",

@@ -105,6 +105,13 @@ class FakePaymentGateway:
             raise GatewayNotFoundError
         return payment
 
+    async def fetch_order_payments(self, order_id: str) -> list[GatewayPayment]:
+        require_gateway_id(order_id, "order")
+        self._check_available()
+        if order_id not in self.orders:
+            raise GatewayNotFoundError
+        return [p for p in self.payments.values() if p.order_id == order_id]
+
     async def capture_payment(self, payment_id: str, amount_paise: int) -> GatewayPayment:
         payment = await self.fetch_payment(payment_id)
         if (
@@ -131,6 +138,15 @@ class FakePaymentGateway:
         )
         self.refunds[refund.id] = refund
         self.payments[payment_id] = replace(payment, status=GatewayPaymentStatus.REFUNDED)
+        return refund
+
+    async def fetch_refund(self, payment_id: str, refund_id: str) -> GatewayRefund:
+        require_gateway_id(payment_id, "pay")
+        require_gateway_id(refund_id, "rfnd")
+        self._check_available()
+        refund = self.refunds.get(refund_id)
+        if refund is None or refund.payment_id != payment_id:
+            raise GatewayNotFoundError
         return refund
 
     async def fetch_card_token(self, customer_id: str, token_id: str) -> GatewayCardToken:
@@ -163,13 +179,17 @@ class FakePaymentGateway:
         card: GatewayCard = DEFAULT_TEST_CARD,
         customer_id: str | None = None,
         save_card: bool = False,
+        token_id: str | None = None,
     ) -> CheckoutResult:
-        """Pretend the user paid for order_id in checkout."""
+        """Pretend the user paid for order_id in checkout: with a new card (optionally
+        saving it), or with a saved card by passing its token_id."""
         order = self.orders.get(order_id)
         if order is None:
             raise GatewayNotFoundError
-        token_id = None
-        if save_card and customer_id and status != GatewayPaymentStatus.FAILED:
+        if token_id is not None:
+            saved = self.tokens[token_id]
+            card, customer_id = saved.card, saved.customer_id
+        elif save_card and customer_id and status != GatewayPaymentStatus.FAILED:
             token = GatewayCardToken(id=_new_id("token"), customer_id=customer_id, card=card)
             self.tokens[token.id] = token
             token_id = token.id

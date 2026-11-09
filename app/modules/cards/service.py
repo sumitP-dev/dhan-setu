@@ -34,7 +34,7 @@ from app.common.exceptions import (
 )
 from app.core.config import Settings
 from app.core.database import utcnow
-from app.modules.cards.models import Card, CardVerification
+from app.modules.cards.models import Card, CardVerification, card_expired
 from app.modules.cards.repository import CardRepository, CardVerificationRepository
 from app.modules.payments.gateway import PaymentGateway
 from app.modules.payments.gateway.base import (
@@ -42,11 +42,15 @@ from app.modules.payments.gateway.base import (
     GatewayNotFoundError,
     GatewayPayment,
     GatewayPaymentStatus,
-    GatewayRefundStatus,
+    GatewayRefund,
     PaymentGatewayError,
     PaymentGatewayUnavailableError,
 )
-from app.modules.payments.service import GatewayCustomerService
+from app.modules.payments.service import (
+    GatewayCustomerService,
+    apply_refund_update,
+    refund_status_from_gateway,
+)
 from app.modules.users.models import User
 
 logger = logging.getLogger(__name__)
@@ -54,6 +58,13 @@ logger = logging.getLogger(__name__)
 VERIFICATION_AMOUNT_PAISE = MIN_ORDER_AMOUNT_PAISE  # ₹1
 VERIFICATION_TTL = timedelta(minutes=30)
 SUPPORTED_CARD_TYPES = frozenset({CardType.CREDIT, CardType.DEBIT})
+# Which attempt on an order decides the check, most decisive first.
+_ATTEMPT_PRIORITY = (
+    GatewayPaymentStatus.CAPTURED,
+    GatewayPaymentStatus.AUTHORIZED,
+    GatewayPaymentStatus.REFUNDED,
+    GatewayPaymentStatus.FAILED,
+)
 
 FAILURE_MESSAGES = {
     "payment_failed": "The ₹1 charge didn't go through. Try again or use another card.",
@@ -221,6 +232,40 @@ class CardService:
         await self.settle(verification, payment)
         return await self._result(verification)
 
+    async def settle_order(self, order_id: str) -> bool:
+        """Webhook: bring a card check up to date from the gateway by its order. Finishes
+        checks the app never completed (e.g. it closed after paying). False if the order
+        isn't a card check."""
+        verification = await self._verifications.get_by_order_id(order_id, for_update=True)
+        if verification is None:
+            return False
+        if verification.status in {
+            CardVerificationStatus.VERIFIED,
+            CardVerificationStatus.FAILED,
+        }:
+            return True
+        attempts = await self._gateway.fetch_order_payments(order_id)
+        if verification.status == CardVerificationStatus.CHARGED:
+            # Resume with the payment that was already taken.
+            attempts = [a for a in attempts if a.id == verification.gateway_payment_id]
+        decisive = next(
+            (a for status in _ATTEMPT_PRIORITY for a in attempts if a.status == status), None
+        )
+        if decisive is not None:
+            await self.settle(verification, decisive)
+        return True
+
+    async def apply_refund(self, refund: GatewayRefund) -> bool:
+        """Webhook: a refund changed. False if it isn't for a card check."""
+        verification = await self._verifications.get_by_gateway_payment_id(
+            refund.payment_id, for_update=True
+        )
+        if verification is None:
+            return False
+        apply_refund_update(verification, refund)
+        await self._verifications.flush()
+        return True
+
     async def settle(self, verification: CardVerification, payment: GatewayPayment) -> None:
         """Apply the gateway's view of the payment. The caller holds the row lock."""
         self._ensure_payment_matches(verification, payment)
@@ -310,9 +355,7 @@ class CardService:
             raise _CardRejectedError("card_type_not_supported")
         if details.expiry_month is None or details.expiry_year is None:
             raise _CardRejectedError("card_not_saved")
-        today = utcnow()
-        # A card works until the end of its expiry month.
-        if (details.expiry_year, details.expiry_month) < (today.year, today.month):
+        if card_expired(details.expiry_month, details.expiry_year, utcnow()):
             raise _CardRejectedError("card_expired")
 
         await self._customers.lock(user_id)
@@ -369,11 +412,7 @@ class CardService:
             logger.warning("Refund of card check %s not confirmed; left pending", verification.id)
             return
         verification.gateway_refund_id = refund.id
-        verification.refund_status = {
-            GatewayRefundStatus.PROCESSED: RefundStatus.PROCESSED,
-            GatewayRefundStatus.PENDING: RefundStatus.REQUESTED,
-            GatewayRefundStatus.FAILED: RefundStatus.FAILED,
-        }[refund.status]
+        verification.refund_status = refund_status_from_gateway(refund.status)
         if verification.refund_status == RefundStatus.FAILED:
             logger.error("Refund %s of card check %s failed", refund.id, verification.id)
         await self._verifications.flush()

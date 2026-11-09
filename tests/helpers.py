@@ -1,7 +1,8 @@
 import math
 import time
+import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from httpx import AsyncClient, Response
 from pydantic import SecretStr
@@ -9,6 +10,9 @@ from pydantic_settings import SettingsConfigDict
 
 from app.common.enums import OtpPurpose
 from app.core.config import Settings
+
+if TYPE_CHECKING:
+    from app.modules.payments.gateway.fake import FakePaymentGateway
 
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 TEST_REDIS_URL = "redis://localhost:6379/15"
@@ -176,3 +180,30 @@ async def login(
 
 def bearer(access_token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {access_token}"}
+
+
+def new_idempotency_key() -> str:
+    return uuid.uuid4().hex
+
+
+async def add_saved_card(
+    client: AsyncClient, headers: dict[str, str], gateway: "FakePaymentGateway", **card: Any
+) -> dict[str, Any]:
+    """Add a card through the ₹1 check (fake checkout). Returns the saved card."""
+    started = await client.post(
+        "/api/v1/cards/verifications",
+        headers=headers | {"Idempotency-Key": new_idempotency_key()},
+    )
+    assert started.status_code == 201, started.text
+    options = started.json()["checkout"]
+    result = gateway.complete_checkout(
+        options["order_id"], customer_id=options["customer_id"], save_card=True, **card
+    )
+    response = await client.post(
+        f"/api/v1/cards/verifications/{started.json()['id']}/complete",
+        headers=headers,
+        json={"payment_id": result.payment_id, "signature": result.signature},
+    )
+    assert response.json()["status"] == "verified", response.text
+    saved: dict[str, Any] = response.json()["card"]
+    return saved

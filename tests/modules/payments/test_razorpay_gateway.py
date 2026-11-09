@@ -261,3 +261,43 @@ async def test_refund_sends_amount_and_checks_the_reply() -> None:
             await make_gateway(respond(200, reply | bad)).refund_payment(
                 "pay_29QQoUBi66xm2f", 100, receipt="cvr_1"
             )
+
+
+async def test_order_payments_must_all_belong_to_that_order() -> None:
+    seen: list[httpx.Request] = []
+    good = {"entity": "collection", "count": 1, "items": [payment_body()]}
+    gateway = make_gateway(respond(200, good), seen)
+
+    payments = await gateway.fetch_order_payments("order_9A33XWu170gUtm")
+
+    assert [p.id for p in payments] == ["pay_29QQoUBi66xm2f"]
+    assert seen[0].url.path == "/v1/orders/order_9A33XWu170gUtm/payments"
+    for bad in (
+        {"items": [payment_body(order_id="order_SomeoneElse01")]},
+        {"items": [payment_body(amount=1.5)]},
+        {"items": "nope"},
+        {},
+    ):
+        with pytest.raises(PaymentGatewayError):
+            await make_gateway(respond(200, bad)).fetch_order_payments("order_9A33XWu170gUtm")
+
+
+async def test_fetch_refund_checks_it_belongs_to_the_payment() -> None:
+    reply = {
+        "id": "rfnd_FP8QHiV938haTz",
+        "payment_id": "pay_29QQoUBi66xm2f",
+        "amount": 100,
+        "status": "processed",
+    }
+    seen: list[httpx.Request] = []
+
+    refund = await make_gateway(respond(200, reply), seen).fetch_refund(
+        "pay_29QQoUBi66xm2f", "rfnd_FP8QHiV938haTz"
+    )
+
+    assert refund.amount_paise == 100
+    assert seen[0].url.path == "/v1/payments/pay_29QQoUBi66xm2f/refunds/rfnd_FP8QHiV938haTz"
+    with pytest.raises(PaymentGatewayError):
+        await make_gateway(
+            respond(200, reply | {"payment_id": "pay_SomeoneElse0001"})
+        ).fetch_refund("pay_29QQoUBi66xm2f", "rfnd_FP8QHiV938haTz")

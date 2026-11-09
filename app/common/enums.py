@@ -72,3 +72,9 @@ class RefundStatus(StrEnum):
     REQUESTED = "requested"  # the gateway accepted it and is processing
     PROCESSED = "processed"
     FAILED = "failed"
+
+
+class WebhookEventStatus(StrEnum):
+    PROCESSED = "processed"
+    IGNORED = "ignored"  # an event type or order we don't handle
+    FAILED = "failed"  # signed, but unusable (bad payload, doesn't match our records)

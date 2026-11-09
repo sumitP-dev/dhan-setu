@@ -166,3 +166,35 @@ Authorization: Bearer {{login.response.body.$.tokens.access_token}}
 ### C6. Remove a card (also deletes it at Razorpay)
 DELETE {{baseUrl}}/cards/{{cardId}}
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### ---- Card payments (needs a saved card: set @cardId above)
+
+### P1. Start a payment of ₹500 with a saved card. NEW Idempotency-Key per payment.
+# @name payment
+POST {{baseUrl}}/payments/orders
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+Idempotency-Key: {{$guid}}
+Content-Type: application/json
+
+{
+  "amount_paise": 50000,
+  "card_id": "{{cardId}}",
+  "description": "Test payment"
+}
+
+
+### P2. Verify: send what Razorpay checkout returned (the mobile app does this)
+POST {{baseUrl}}/payments/{{payment.response.body.$.payment.id}}/verify
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+Content-Type: application/json
+
+{
+  "payment_id": "pay_REPLACE_ME",
+  "signature": "REPLACE_WITH_64_HEX_CHARS"
+}
+
+
+### P3. Payment status (poll while pending)
+GET {{baseUrl}}/payments/{{payment.response.body.$.payment.id}}
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
