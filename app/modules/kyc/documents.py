@@ -115,7 +115,9 @@ class KycDocumentService:
             return None
         if profile is None:
             return "digilocker"
-        return "selfie" if profile.pan_verified else "pan"
+        if not profile.pan_verified:
+            return "pan"
+        return "submit" if profile.selfie_session_id else "selfie"
 
     def _details(self, profile: KycProfile) -> KycDetails | None:
         if self._cipher is None:
@@ -133,6 +135,7 @@ class KycDocumentService:
                 pan_verified=profile.pan_verified,
                 pan_issue=profile.pan_issue,
                 pan_issue_message=PAN_ISSUE_MESSAGES.get(profile.pan_issue or ""),
+                selfie_verified=profile.selfie_session_id is not None,
                 fetched_at=profile.fetched_at,
             )
         except DecryptionError:
@@ -362,6 +365,8 @@ class KycDocumentService:
         )
         profile.aadhaar_last4 = aadhaar.last4
         profile.fetched_at = utcnow()
+        # A selfie was matched against the previous Aadhaar photo; it must be taken again.
+        profile.selfie_session_id = None
 
     @staticmethod
     def _clear_pan(profile: KycProfile, *, issue: str) -> None:

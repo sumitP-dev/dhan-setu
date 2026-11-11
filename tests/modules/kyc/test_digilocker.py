@@ -206,6 +206,7 @@ async def test_completed_digilocker_moves_kyc_to_in_progress(
         "pan_verified": True,
         "pan_issue": None,
         "pan_issue_message": None,
+        "selfie_verified": False,
         "fetched_at": body["details"]["fetched_at"],
     }
 

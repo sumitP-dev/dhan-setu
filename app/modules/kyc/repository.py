@@ -5,8 +5,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import KycStatus
-from app.modules.kyc.models import KycDigiLockerSession, KycEvent, KycProfile
-from app.modules.kyc.provider.base import DigiLockerStatus
+from app.modules.kyc.models import KycDigiLockerSession, KycEvent, KycProfile, KycSelfieSession
+from app.modules.kyc.provider.base import DigiLockerStatus, SelfieStatus
 from app.modules.users.models import User
 
 
@@ -92,6 +92,44 @@ class KycRepository:
                 KycDigiLockerSession.user_id == user_id,
                 KycDigiLockerSession.created_at >= since,
             )
+        )
+        return count or 0
+
+    # ---- Selfie sessions
+
+    def add_selfie(self, selfie: KycSelfieSession) -> None:
+        self._session.add(selfie)
+
+    async def get_selfie(
+        self, selfie_id: uuid.UUID, user_id: uuid.UUID, *, for_update: bool = False
+    ) -> KycSelfieSession | None:
+        query = select(KycSelfieSession).where(
+            KycSelfieSession.id == selfie_id, KycSelfieSession.user_id == user_id
+        )
+        if for_update:
+            query = query.with_for_update().execution_options(populate_existing=True)
+        return await self._session.scalar(query)
+
+    async def open_selfie(
+        self, user_id: uuid.UUID, digilocker_session_id: uuid.UUID, now: datetime
+    ) -> KycSelfieSession | None:
+        return await self._session.scalar(
+            select(KycSelfieSession)
+            .where(
+                KycSelfieSession.user_id == user_id,
+                KycSelfieSession.digilocker_session_id == digilocker_session_id,
+                KycSelfieSession.status == SelfieStatus.PENDING,
+                KycSelfieSession.expires_at > now,
+            )
+            .order_by(KycSelfieSession.created_at.desc())
+            .limit(1)
+        )
+
+    async def count_selfies_since(self, user_id: uuid.UUID, since: datetime) -> int:
+        count = await self._session.scalar(
+            select(func.count())
+            .select_from(KycSelfieSession)
+            .where(KycSelfieSession.user_id == user_id, KycSelfieSession.created_at >= since)
         )
         return count or 0
 

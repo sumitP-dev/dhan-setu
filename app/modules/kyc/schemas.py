@@ -6,10 +6,10 @@ from pydantic import Field
 
 from app.common.enums import KycStatus
 from app.common.schemas import RequestModel, ResponseModel
-from app.modules.kyc.provider.base import DigiLockerStatus, Gender
+from app.modules.kyc.provider.base import DigiLockerStatus, Gender, SelfieStatus
 
 # What the app should show next.
-KycNextStep = Literal["digilocker", "pan", "selfie"]
+KycNextStep = Literal["digilocker", "pan", "selfie", "submit"]
 
 
 class KycDetails(ResponseModel):
@@ -25,6 +25,8 @@ class KycDetails(ResponseModel):
     pan_verified: bool
     pan_issue: str | None
     pan_issue_message: str | None
+    # A live selfie matched the Aadhaar photo.
+    selfie_verified: bool
     fetched_at: datetime
 
 
@@ -50,3 +52,16 @@ class PanSubmit(RequestModel):
     """For users whose PAN isn't in DigiLocker."""
 
     pan: str = Field(min_length=10, max_length=12, examples=["ABCPV1234F"])
+
+
+class SelfieSessionRead(ResponseModel):
+    id: uuid.UUID
+    status: SelfieStatus
+    failure_reason: str | None
+    failure_message: str | None
+    expires_at: datetime
+
+
+class SelfieSessionStart(SelfieSessionRead):
+    # Starts the provider's selfie SDK in the app. Short-lived; only returned here.
+    sdk_token: str

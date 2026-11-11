@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     kyc_encryption_key: SecretStr | None = None
     # New DigiLocker sessions per user per day.
     kyc_attempts_per_day: int = Field(default=5, gt=0, le=20)
+    # New selfie sessions per user per day.
+    kyc_selfie_attempts_per_day: int = Field(default=5, gt=0, le=20)
+    # Lowest face-match score (0-100) against the Aadhaar photo that passes. Below 70
+    # lets different people through; the provider's own guidance is usually 75-85.
+    kyc_selfie_min_match_score: int = Field(default=80, ge=70, le=100)
     # Where DigiLocker sends the user back (our callback), and where that callback
     # then sends them (the app's deep link).
     public_base_url: str = "http://localhost:8000"

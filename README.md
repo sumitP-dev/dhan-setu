@@ -146,6 +146,8 @@ Full interactive docs: http://localhost:8000/docs
 | GET | `/api/v1/kyc/digilocker/{id}` | Bearer | Session status; checks with the provider while open |
 | GET | `/api/v1/kyc/digilocker/callback?state=` | - (one-time `state`) | DigiLocker sends the browser here; redirects to the app with the outcome |
 | POST | `/api/v1/kyc/pan` | Bearer | PAN typed in, when it isn't in DigiLocker or didn't match |
+| POST | `/api/v1/kyc/selfie` | Bearer | Start (or reuse the open) selfie session: returns `sdk_token` for the provider's SDK |
+| GET | `/api/v1/kyc/selfie/{id}` | Bearer | Selfie result (liveness + match with the Aadhaar photo); checks with the provider while open |
 | GET | `/api/v1/cards` | Bearer + KYC | Saved cards, default first |
 | POST | `/api/v1/cards/verifications` | Bearer + KYC + `Idempotency-Key` | Start adding a card: ₹1 order + checkout options |
 | POST | `/api/v1/cards/verifications/{id}/complete` | Bearer + KYC | Send checkout's payment id + signature: saves the card, refunds ₹1 |
@@ -180,6 +182,11 @@ How documents are collected:
 4. Stored: name, date of birth, address and PAN encrypted with AES-256-GCM
    (`KYC_ENCRYPTION_KEY`), Aadhaar last 4 digits, a masked PAN and a keyed PAN hash.
    Never stored: the full Aadhaar number, the Aadhaar XML, photos.
+5. Selfie (`next_step` = `selfie`): `POST /kyc/selfie` returns an `sdk_token`; the app
+   runs the provider's selfie SDK, then polls `GET /kyc/selfie/{id}`. The backend fetches
+   the result itself: the person must be live and the face-match score against the Aadhaar
+   photo at least `KYC_SELFIE_MIN_MATCH_SCORE` (default 80). Running DigiLocker again
+   clears a passed selfie, since the photo may have changed. Then `next_step` is `submit`.
 
 Only `KycService.transition()` changes the status: under a row lock, checked against the
 allowed changes, recorded in `kyc_events`. `KYC_PROVIDER=fake` (default outside

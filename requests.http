@@ -93,6 +93,17 @@ Content-Type: application/json
 }
 
 
+### 5e. Start the selfie (after DigiLocker and PAN). Pass sdk_token to the provider's SDK.
+# @name selfie
+POST {{baseUrl}}/kyc/selfie
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### 5f. Selfie result (poll after the SDK closes)
+GET {{baseUrl}}/kyc/selfie/{{selfie.response.body.$.id}}
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
 ### 6. Update profile name
 PATCH {{baseUrl}}/users/me
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}

@@ -11,6 +11,7 @@ from app.modules.auth.dependencies import CurrentUser
 from app.modules.kyc.documents import KycDocumentService
 from app.modules.kyc.provider import KycProvider
 from app.modules.kyc.repository import KycRepository
+from app.modules.kyc.selfie import KycSelfieService
 from app.modules.kyc.service import KycService
 from app.modules.users.models import User
 
@@ -46,6 +47,18 @@ def get_kyc_document_service(
 
 
 KycDocumentServiceDep = Annotated[KycDocumentService, Depends(get_kyc_document_service)]
+
+
+def get_kyc_selfie_service(
+    db: DbSession,
+    provider: KycProviderDep,
+    cipher: Annotated[FieldCipher | None, Depends(get_field_cipher)],
+    settings: AppSettings,
+) -> KycSelfieService:
+    return KycSelfieService(KycRepository(db), provider, cipher, settings)
+
+
+KycSelfieServiceDep = Annotated[KycSelfieService, Depends(get_kyc_selfie_service)]
 
 
 class KycRequiredError(ForbiddenError):
