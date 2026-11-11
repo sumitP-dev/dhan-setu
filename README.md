@@ -141,7 +141,11 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/api/v1/auth/change-password` | Bearer | Change password, signs out other devices |
 | GET | `/api/v1/users/me` | Bearer | Current user's profile, including `kyc_status` |
 | PATCH | `/api/v1/users/me` | Bearer | Update full name |
-| GET | `/api/v1/kyc` | Bearer | KYC status and whether the user can start or continue it |
+| GET | `/api/v1/kyc` | Bearer | KYC status, next step, and the DigiLocker details (masked) to check |
+| POST | `/api/v1/kyc/digilocker` | Bearer | Start (or reuse the open) DigiLocker session: returns `consent_url` |
+| GET | `/api/v1/kyc/digilocker/{id}` | Bearer | Session status; checks with the provider while open |
+| GET | `/api/v1/kyc/digilocker/callback?state=` | - (one-time `state`) | DigiLocker sends the browser here; redirects to the app with the outcome |
+| POST | `/api/v1/kyc/pan` | Bearer | PAN typed in, when it isn't in DigiLocker or didn't match |
 | GET | `/api/v1/cards` | Bearer + KYC | Saved cards, default first |
 | POST | `/api/v1/cards/verifications` | Bearer + KYC + `Idempotency-Key` | Start adding a card: ₹1 order + checkout options |
 | POST | `/api/v1/cards/verifications/{id}/complete` | Bearer + KYC | Send checkout's payment id + signature: saves the card, refunds ₹1 |
@@ -161,6 +165,21 @@ they answer 403 with code `kyc_required`. "Bearer + KYC" in the table above mark
     not_submitted -> in_progress -> pending_review -> verified
                           ^               |
                           +-- rejected <--+
+
+How documents are collected:
+
+1. `POST /kyc/digilocker` -> open `consent_url`; the user logs in to DigiLocker and allows
+   sharing Aadhaar and PAN.
+2. DigiLocker sends the browser to `/kyc/digilocker/callback?state=...` (a one-time token;
+   only its SHA-256 is stored). The backend fetches the documents from the provider itself,
+   then redirects to `KYC_APP_RETURN_URL?status=completed|pending|...`. If the browser
+   never comes back, the app polls `GET /kyc/digilocker/{id}`.
+3. Checks: UIDAI's signature on the Aadhaar; PAN must be a personal PAN whose name and
+   date of birth match the Aadhaar; one PAN per account. If the PAN is missing or doesn't
+   match, `next_step` is `pan` and the user can type it in (`POST /kyc/pan`, 5 tries).
+4. Stored: name, date of birth, address and PAN encrypted with AES-256-GCM
+   (`KYC_ENCRYPTION_KEY`), Aadhaar last 4 digits, a masked PAN and a keyed PAN hash.
+   Never stored: the full Aadhaar number, the Aadhaar XML, photos.
 
 Only `KycService.transition()` changes the status: under a row lock, checked against the
 allowed changes, recorded in `kyc_events`. `KYC_PROVIDER=fake` (default outside

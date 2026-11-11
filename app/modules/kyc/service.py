@@ -4,13 +4,8 @@ from app.common.enums import KycStatus
 from app.common.exceptions import NotFoundError
 from app.modules.kyc.models import KycEvent
 from app.modules.kyc.repository import KycRepository
-from app.modules.kyc.schemas import KycRead
-from app.modules.kyc.state import CAN_START, InvalidKycTransitionError, ensure_transition
+from app.modules.kyc.state import InvalidKycTransitionError, ensure_transition
 from app.modules.users.models import User
-
-
-def kyc_read(status: KycStatus) -> KycRead:
-    return KycRead(status=status, can_start=status in CAN_START)
 
 
 class KycService:

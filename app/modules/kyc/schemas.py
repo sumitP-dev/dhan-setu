@@ -1,8 +1,52 @@
+import uuid
+from datetime import date, datetime
+from typing import Literal
+
+from pydantic import Field
+
 from app.common.enums import KycStatus
-from app.common.schemas import ResponseModel
+from app.common.schemas import RequestModel, ResponseModel
+from app.modules.kyc.provider.base import DigiLockerStatus, Gender
+
+# What the app should show next.
+KycNextStep = Literal["digilocker", "pan", "selfie"]
+
+
+class KycDetails(ResponseModel):
+    """What DigiLocker returned, for the user to check. Aadhaar and PAN are masked."""
+
+    name: str
+    date_of_birth: date | None
+    birth_year: int
+    gender: Gender
+    address: str | None
+    aadhaar: str  # XXXX XXXX 1234
+    pan: str | None  # ABCXX1234F
+    pan_verified: bool
+    pan_issue: str | None
+    pan_issue_message: str | None
+    fetched_at: datetime
 
 
 class KycRead(ResponseModel):
     status: KycStatus
     # True when the user can start or continue KYC (not while it's under review).
     can_start: bool
+    next_step: KycNextStep | None
+    details: KycDetails | None
+
+
+class DigiLockerSessionRead(ResponseModel):
+    id: uuid.UUID
+    status: DigiLockerStatus
+    # Open this in a browser; the user logs in to DigiLocker and allows sharing.
+    consent_url: str
+    expires_at: datetime
+    failure_reason: str | None
+    failure_message: str | None
+
+
+class PanSubmit(RequestModel):
+    """For users whose PAN isn't in DigiLocker."""
+
+    pan: str = Field(min_length=10, max_length=12, examples=["ABCPV1234F"])

@@ -5,6 +5,8 @@ from fastapi import Depends, Request
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.encryption import decode_master_key
+
 MIN_JWT_SECRET_LENGTH = 32
 MIN_WEBHOOK_SECRET_LENGTH = 16
 RAZORPAY_TEST_KEY_PREFIX = "rzp_test_"
@@ -62,6 +64,15 @@ class Settings(BaseSettings):
     # KYC (Aadhaar and PAN through DigiLocker, plus a selfie). The fake provider
     # verifies anyone, so it is refused in production.
     kyc_provider: KycProviderName = "fake"
+    # 32 random bytes, URL-safe base64. Encrypts KYC personal data in the database.
+    # Required unless KYC_PROVIDER=none. Losing it makes stored KYC data unreadable.
+    kyc_encryption_key: SecretStr | None = None
+    # New DigiLocker sessions per user per day.
+    kyc_attempts_per_day: int = Field(default=5, gt=0, le=20)
+    # Where DigiLocker sends the user back (our callback), and where that callback
+    # then sends them (the app's deep link).
+    public_base_url: str = "http://localhost:8000"
+    kyc_app_return_url: str = "dhansetu://kyc/digilocker"
 
     # Cards. Each new card is checked with a ₹1 charge that is refunded straight away.
     # Small test charges are how stolen cards get tried, so new checks are capped per user.
@@ -85,9 +96,23 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _kyc_provider_is_safe(self) -> "Settings":
-        if self.kyc_provider == "fake" and self.environment == "production":
+        is_production = self.environment == "production"
+        if self.kyc_provider == "fake" and is_production:
             msg = "KYC_PROVIDER=fake is not allowed in production"
             raise ValueError(msg)
+        if is_production and not self.public_base_url.startswith("https://"):
+            msg = "PUBLIC_BASE_URL must be https in production"
+            raise ValueError(msg)
+        if self.kyc_provider == "none":
+            return self
+        if self.kyc_encryption_key is None:
+            msg = "KYC_ENCRYPTION_KEY is required unless KYC_PROVIDER=none"
+            raise ValueError(msg)
+        try:
+            decode_master_key(self.kyc_encryption_key.get_secret_value())
+        except ValueError as error:
+            msg = f"KYC_ENCRYPTION_KEY {error}"
+            raise ValueError(msg) from error
         return self
 
     @model_validator(mode="after")

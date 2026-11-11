@@ -61,6 +61,8 @@ def _now() -> datetime:
 class _DigiLocker:
     session: DigiLockerSession
     reference: str
+    # Where the provider sends the user's browser afterwards (our callback).
+    redirect_url: str
     result: DigiLockerResult
 
 
@@ -116,6 +118,7 @@ class FakeKycProvider:
         self.digilocker[session_id] = _DigiLocker(
             session=session,
             reference=reference,
+            redirect_url=redirect_url,
             result=DigiLockerResult(session_id=session_id, status=DigiLockerStatus.PENDING),
         )
         return session

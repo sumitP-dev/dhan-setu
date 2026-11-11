@@ -19,6 +19,8 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 TEST_REDIS_URL = "redis://localhost:6379/15"
 TEST_JWT_SECRET = "test-jwt-secret-that-is-long-enough-0123456789"
 TEST_PASSWORD = "Secret123"
+# 32 fixed bytes, URL-safe base64: test-only KYC encryption key.
+TEST_KYC_KEY = "dGVzdC1reWMta2V5LXRlc3Qta3ljLWtleS10ZXN0LWs="
 
 
 class _IsolatedSettings(Settings):
@@ -32,6 +34,7 @@ def make_settings(**overrides: Any) -> Settings:
         "database_url": SecretStr(TEST_DATABASE_URL),
         "redis_url": SecretStr(TEST_REDIS_URL),
         "jwt_secret_key": SecretStr(TEST_JWT_SECRET),
+        "kyc_encryption_key": SecretStr(TEST_KYC_KEY),
         "bcrypt_rounds": 4,  # the minimum; keeps tests fast
         # Responses include dev_otp, which register() below relies on.
         "debug": True,

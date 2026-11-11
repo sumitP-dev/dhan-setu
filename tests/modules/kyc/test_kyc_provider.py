@@ -332,6 +332,7 @@ def test_fake_provider_is_refused_in_production() -> None:
         "razorpay_key_id": "rzp_live_abc123",
         "razorpay_key_secret": "live-key-secret",
         "razorpay_webhook_secret": "live-webhook-secret",
+        "public_base_url": "https://api.dhansetu.example",
     }
     with pytest.raises(ValueError, match="KYC_PROVIDER=fake"):
         make_settings(**production, kyc_provider="fake")

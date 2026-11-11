@@ -113,7 +113,7 @@ def test_unsigned_token_is_rejected() -> None:
             "iat": datetime.now(UTC),
             "exp": datetime.now(UTC) + timedelta(minutes=5),
         },
-        key=None,
+        key="",  # unsigned: the "none" algorithm takes no key
         algorithm="none",
     )
 

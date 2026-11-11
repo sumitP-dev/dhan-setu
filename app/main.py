@@ -8,6 +8,7 @@ from app.api import api_router
 from app.common.exceptions import register_exception_handlers
 from app.core.config import Settings, get_settings
 from app.core.database import create_db_engine, create_session_factory
+from app.core.encryption import FieldCipher, decode_master_key
 from app.core.logging import configure_logging
 from app.core.redis import create_redis_client
 from app.modules.kyc.provider import create_kyc_provider
@@ -48,6 +49,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.sms_sender = ConsoleSmsSender(log_codes=settings.environment != "production")
     app.state.payment_gateway = create_payment_gateway(settings)
     app.state.kyc_provider = create_kyc_provider(settings)
+    kyc_key = settings.kyc_encryption_key
+    app.state.field_cipher = (
+        FieldCipher(decode_master_key(kyc_key.get_secret_value())) if kyc_key else None
+    )
 
     if settings.cors_origins:
         app.add_middleware(

@@ -90,25 +90,33 @@ async def test_new_user_has_not_submitted_kyc(
     me = await client.get(ME, headers=headers)
 
     assert kyc.status_code == 200
-    assert kyc.json() == {"status": "not_submitted", "can_start": True}
+    assert kyc.json() == {
+        "status": "not_submitted",
+        "can_start": True,
+        "next_step": "digilocker",
+        "details": None,
+    }
     assert me.json()["kyc_status"] == "not_submitted"
 
 
 @pytest.mark.parametrize(
     ("path", "expected"),
     [
-        ((KycStatus.IN_PROGRESS,), {"status": "in_progress", "can_start": True}),
+        (
+            (KycStatus.IN_PROGRESS,),
+            {"status": "in_progress", "can_start": True, "next_step": "digilocker"},
+        ),
         (
             (KycStatus.IN_PROGRESS, KycStatus.PENDING_REVIEW),
-            {"status": "pending_review", "can_start": False},
+            {"status": "pending_review", "can_start": False, "next_step": None},
         ),
         (
             (KycStatus.IN_PROGRESS, KycStatus.PENDING_REVIEW, KycStatus.REJECTED),
-            {"status": "rejected", "can_start": True},
+            {"status": "rejected", "can_start": True, "next_step": "digilocker"},
         ),
         (
             (KycStatus.IN_PROGRESS, KycStatus.PENDING_REVIEW, KycStatus.VERIFIED),
-            {"status": "verified", "can_start": False},
+            {"status": "verified", "can_start": False, "next_step": None},
         ),
     ],
 )
@@ -124,7 +132,7 @@ async def test_kyc_reports_each_status(
 
     response = await client.get(KYC, headers=headers)
 
-    assert response.json() == expected
+    assert response.json() == expected | {"details": None}
     assert (await client.get(ME, headers=headers)).json()["kyc_status"] == expected["status"]
 
 

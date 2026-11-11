@@ -4,8 +4,11 @@ from fastapi import Depends, Request
 
 from app.common.enums import KycStatus
 from app.common.exceptions import ForbiddenError
+from app.core.config import AppSettings
 from app.core.database import DbSession
+from app.core.encryption import FieldCipher
 from app.modules.auth.dependencies import CurrentUser
+from app.modules.kyc.documents import KycDocumentService
 from app.modules.kyc.provider import KycProvider
 from app.modules.kyc.repository import KycRepository
 from app.modules.kyc.service import KycService
@@ -25,6 +28,24 @@ def get_kyc_service(db: DbSession) -> KycService:
 
 
 KycServiceDep = Annotated[KycService, Depends(get_kyc_service)]
+
+
+def get_field_cipher(request: Request) -> FieldCipher | None:
+    cipher: FieldCipher | None = request.app.state.field_cipher
+    return cipher
+
+
+def get_kyc_document_service(
+    db: DbSession,
+    provider: KycProviderDep,
+    cipher: Annotated[FieldCipher | None, Depends(get_field_cipher)],
+    settings: AppSettings,
+) -> KycDocumentService:
+    repository = KycRepository(db)
+    return KycDocumentService(repository, KycService(repository), provider, cipher, settings)
+
+
+KycDocumentServiceDep = Annotated[KycDocumentService, Depends(get_kyc_document_service)]
 
 
 class KycRequiredError(ForbiddenError):

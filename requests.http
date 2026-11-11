@@ -78,6 +78,21 @@ GET {{baseUrl}}/kyc
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}
 
 
+### 5c. Start DigiLocker (open consent_url in a browser)
+POST {{baseUrl}}/kyc/digilocker
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### 5d. PAN typed in (when it isn't in DigiLocker)
+POST {{baseUrl}}/kyc/pan
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+Content-Type: application/json
+
+{
+  "pan": "ABCPV1234F"
+}
+
+
 ### 6. Update profile name
 PATCH {{baseUrl}}/users/me
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}
