@@ -22,7 +22,13 @@ from app.modules.payments.gateway.fake import CheckoutResult, FakePaymentGateway
 from app.modules.payments.models import Payment, PaymentEvent
 from app.modules.payments.repository import PaymentRepository
 from app.modules.payments.service import PaymentService
-from tests.helpers import add_saved_card, bearer, make_settings, new_idempotency_key, register
+from tests.helpers import (
+    add_saved_card,
+    bearer,
+    make_settings,
+    new_idempotency_key,
+    register_kyc_verified,
+)
 
 PAYMENTS = "/api/v1/payments"
 
@@ -34,14 +40,14 @@ def gateway(app: FastAPI) -> FakePaymentGateway:
 
 
 @pytest.fixture
-async def auth(client: AsyncClient) -> dict[str, str]:
-    body = await register(client)
+async def auth(client: AsyncClient, app: FastAPI) -> dict[str, str]:
+    body = await register_kyc_verified(client, app)
     return bearer(body["tokens"]["access_token"])
 
 
 @pytest.fixture
-async def other_auth(client: AsyncClient) -> dict[str, str]:
-    body = await register(client, email="ravi@example.com", phone="9000000001")
+async def other_auth(client: AsyncClient, app: FastAPI) -> dict[str, str]:
+    body = await register_kyc_verified(client, app, email="ravi@example.com", phone="9000000001")
     return bearer(body["tokens"]["access_token"])
 
 

@@ -49,6 +49,14 @@ class UserStatus(StrEnum):
     BLOCKED = "blocked"
 
 
+class KycStatus(StrEnum):
+    NOT_SUBMITTED = "not_submitted"  # not started, or skipped for later
+    IN_PROGRESS = "in_progress"  # documents fetched, not submitted yet
+    PENDING_REVIEW = "pending_review"  # submitted, waiting for an admin
+    VERIFIED = "verified"
+    REJECTED = "rejected"  # can try again
+
+
 class OtpPurpose(StrEnum):
     VERIFY_PHONE = "verify_phone"
     LOGIN = "login"

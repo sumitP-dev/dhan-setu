@@ -12,7 +12,7 @@ from app.modules.payments.gateway.base import (
     PaymentGatewayUnavailableError,
 )
 from app.modules.payments.gateway.fake import DEFAULT_TEST_CARD, FakePaymentGateway
-from tests.helpers import bearer, make_settings, register
+from tests.helpers import bearer, make_settings, register_kyc_verified
 
 CARDS = "/api/v1/cards"
 VERIFY = f"{CARDS}/verifications"
@@ -25,14 +25,14 @@ def gateway(app: FastAPI) -> FakePaymentGateway:
 
 
 @pytest.fixture
-async def auth(client: AsyncClient) -> dict[str, str]:
-    body = await register(client)
+async def auth(client: AsyncClient, app: FastAPI) -> dict[str, str]:
+    body = await register_kyc_verified(client, app)
     return bearer(body["tokens"]["access_token"])
 
 
 @pytest.fixture
-async def other_auth(client: AsyncClient) -> dict[str, str]:
-    body = await register(client, email="ravi@example.com", phone="9000000001")
+async def other_auth(client: AsyncClient, app: FastAPI) -> dict[str, str]:
+    body = await register_kyc_verified(client, app, email="ravi@example.com", phone="9000000001")
     return bearer(body["tokens"]["access_token"])
 
 

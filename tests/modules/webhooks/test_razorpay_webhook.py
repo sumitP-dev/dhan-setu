@@ -23,7 +23,7 @@ from app.modules.payments.gateway.fake import FakePaymentGateway
 from app.modules.payments.models import Payment
 from app.modules.webhooks.models import WebhookEvent
 from app.modules.webhooks.router import MAX_WEBHOOK_BYTES
-from tests.helpers import add_saved_card, bearer, new_idempotency_key, register
+from tests.helpers import add_saved_card, bearer, new_idempotency_key, register_kyc_verified
 
 WEBHOOK = "/api/v1/webhooks/razorpay"
 
@@ -35,8 +35,8 @@ def gateway(app: FastAPI) -> FakePaymentGateway:
 
 
 @pytest.fixture
-async def auth(client: AsyncClient) -> dict[str, str]:
-    body = await register(client)
+async def auth(client: AsyncClient, app: FastAPI) -> dict[str, str]:
+    body = await register_kyc_verified(client, app)
     return bearer(body["tokens"]["access_token"])
 
 

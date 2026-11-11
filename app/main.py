@@ -10,6 +10,7 @@ from app.core.config import Settings, get_settings
 from app.core.database import create_db_engine, create_session_factory
 from app.core.logging import configure_logging
 from app.core.redis import create_redis_client
+from app.modules.kyc.provider import create_kyc_provider
 from app.modules.notifications.service import ConsoleSmsSender
 from app.modules.payments.gateway import create_payment_gateway
 
@@ -20,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await app.state.payment_gateway.aclose()
+        await app.state.kyc_provider.aclose()
         await app.state.redis.aclose()
         await app.state.engine.dispose()
 
@@ -45,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redis = create_redis_client(settings)
     app.state.sms_sender = ConsoleSmsSender(log_codes=settings.environment != "production")
     app.state.payment_gateway = create_payment_gateway(settings)
+    app.state.kyc_provider = create_kyc_provider(settings)
 
     if settings.cors_origins:
         app.add_middleware(

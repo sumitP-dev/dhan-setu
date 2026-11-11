@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from app.common.enums import UserRole, UserStatus
+from app.common.enums import KycStatus, UserRole, UserStatus
 from app.common.schemas import RequestModel, ResponseModel
 from app.common.validators import FullName
 
@@ -13,6 +13,7 @@ class UserRead(ResponseModel):
     full_name: str
     role: UserRole
     status: UserStatus
+    kyc_status: KycStatus
     created_at: datetime
 
 

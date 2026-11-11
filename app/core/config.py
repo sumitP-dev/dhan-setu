@@ -13,6 +13,8 @@ RAZORPAY_LIVE_KEY_PREFIX = "rzp_live_"
 Environment = Literal["local", "test", "staging", "production"]
 # "fake" settles payments in memory with no real money. Refused in production.
 PaymentGatewayName = Literal["razorpay", "fake"]
+# "none": no provider set up yet; KYC is unavailable and nobody can be verified.
+KycProviderName = Literal["fake", "none"]
 
 
 class Settings(BaseSettings):
@@ -57,6 +59,10 @@ class Settings(BaseSettings):
     razorpay_webhook_secret: SecretStr | None = None
     razorpay_timeout_seconds: float = Field(default=10, gt=0, le=30)
 
+    # KYC (Aadhaar and PAN through DigiLocker, plus a selfie). The fake provider
+    # verifies anyone, so it is refused in production.
+    kyc_provider: KycProviderName = "fake"
+
     # Cards. Each new card is checked with a ₹1 charge that is refunded straight away.
     # Small test charges are how stolen cards get tried, so new checks are capped per user.
     card_verifications_per_day: int = Field(default=5, gt=0, le=50)
@@ -76,6 +82,13 @@ class Settings(BaseSettings):
             msg = f"must be at least {MIN_JWT_SECRET_LENGTH} characters"
             raise ValueError(msg)
         return value
+
+    @model_validator(mode="after")
+    def _kyc_provider_is_safe(self) -> "Settings":
+        if self.kyc_provider == "fake" and self.environment == "production":
+            msg = "KYC_PROVIDER=fake is not allowed in production"
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _payment_gateway_is_safe(self) -> "Settings":

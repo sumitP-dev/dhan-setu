@@ -73,6 +73,11 @@ GET {{baseUrl}}/users/me
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}
 
 
+### 5b. KYC status (cards and payments need "verified")
+GET {{baseUrl}}/kyc
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
 ### 6. Update profile name
 PATCH {{baseUrl}}/users/me
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}

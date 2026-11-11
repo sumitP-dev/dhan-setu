@@ -24,7 +24,17 @@ async def test_register_creates_pending_account_and_sends_otp(
     assert user["phone"] == "+919876543210"
     assert user["role"] == "customer"
     assert user["status"] == "pending_verification"
-    assert set(user) == {"id", "email", "phone", "full_name", "role", "status", "created_at"}
+    assert user["kyc_status"] == "not_submitted"
+    assert set(user) == {
+        "id",
+        "email",
+        "phone",
+        "full_name",
+        "role",
+        "status",
+        "kyc_status",
+        "created_at",
+    }
     assert body["otp"]["expires_in"] == 5 * 60
     assert body["otp"]["resend_after"] == 30
     assert sms.last.phone == "+919876543210"

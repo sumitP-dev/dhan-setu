@@ -139,18 +139,32 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/api/v1/auth/refresh` | - | Swap refresh token for a new pair |
 | POST | `/api/v1/auth/logout` | - | Revoke this device's refresh token |
 | POST | `/api/v1/auth/change-password` | Bearer | Change password, signs out other devices |
-| GET | `/api/v1/users/me` | Bearer | Current user's profile |
+| GET | `/api/v1/users/me` | Bearer | Current user's profile, including `kyc_status` |
 | PATCH | `/api/v1/users/me` | Bearer | Update full name |
-| GET | `/api/v1/cards` | Bearer | Saved cards, default first |
-| POST | `/api/v1/cards/verifications` | Bearer + `Idempotency-Key` | Start adding a card: ₹1 order + checkout options |
-| POST | `/api/v1/cards/verifications/{id}/complete` | Bearer | Send checkout's payment id + signature: saves the card, refunds ₹1 |
-| GET | `/api/v1/cards/verifications/{id}` | Bearer | Status of a card check |
-| PATCH | `/api/v1/cards/{id}/default` | Bearer | Make a card the default |
-| DELETE | `/api/v1/cards/{id}` | Bearer | Remove a card (and its token at the gateway) |
-| POST | `/api/v1/payments/orders` | Bearer + `Idempotency-Key` | Start a payment with a saved card: order + checkout options |
-| POST | `/api/v1/payments/{id}/verify` | Bearer | Send checkout's payment id + signature |
-| GET | `/api/v1/payments/{id}` | Bearer | Payment status; checks with the gateway while unsettled |
+| GET | `/api/v1/kyc` | Bearer | KYC status and whether the user can start or continue it |
+| GET | `/api/v1/cards` | Bearer + KYC | Saved cards, default first |
+| POST | `/api/v1/cards/verifications` | Bearer + KYC + `Idempotency-Key` | Start adding a card: ₹1 order + checkout options |
+| POST | `/api/v1/cards/verifications/{id}/complete` | Bearer + KYC | Send checkout's payment id + signature: saves the card, refunds ₹1 |
+| GET | `/api/v1/cards/verifications/{id}` | Bearer + KYC | Status of a card check |
+| PATCH | `/api/v1/cards/{id}/default` | Bearer + KYC | Make a card the default |
+| DELETE | `/api/v1/cards/{id}` | Bearer + KYC | Remove a card (and its token at the gateway) |
+| POST | `/api/v1/payments/orders` | Bearer + KYC + `Idempotency-Key` | Start a payment with a saved card: order + checkout options |
+| POST | `/api/v1/payments/{id}/verify` | Bearer + KYC | Send checkout's payment id + signature |
+| GET | `/api/v1/payments/{id}` | Bearer + KYC | Payment status; checks with the gateway while unsettled |
 | POST | `/api/v1/webhooks/razorpay` | `X-Razorpay-Signature` | Razorpay events (called by Razorpay, not the app) |
+
+### KYC gate
+
+Cards and payments (and later UPI and bills) need `kyc_status` = `verified`; otherwise
+they answer 403 with code `kyc_required`. "Bearer + KYC" in the table above marks them.
+
+    not_submitted -> in_progress -> pending_review -> verified
+                          ^               |
+                          +-- rejected <--+
+
+Only `KycService.transition()` changes the status: under a row lock, checked against the
+allowed changes, recorded in `kyc_events`. `KYC_PROVIDER=fake` (default outside
+production) or `none` (KYC off; required in production until a real provider is set up).
 
 ### How auth works
 

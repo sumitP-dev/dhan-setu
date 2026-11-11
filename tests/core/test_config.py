@@ -9,6 +9,7 @@ PRODUCTION = {
     "razorpay_key_id": "rzp_live_abc123",
     "razorpay_key_secret": SecretStr("live-key-secret"),
     "razorpay_webhook_secret": SecretStr("live-webhook-secret"),
+    "kyc_provider": "none",
 }
 
 
@@ -76,8 +77,9 @@ def test_live_keys_only_in_production_and_production_only_with_live_keys() -> No
         with pytest.raises(ValidationError, match="rzp_test_"):
             make_settings(**(live | {"environment": environment}))
     with pytest.raises(ValidationError, match="rzp_live_"):
-        make_settings(**(RAZORPAY_TEST | {"environment": "production"}))
-    assert make_settings(**(live | {"environment": "production"})).payment_gateway == "razorpay"
+        make_settings(**(RAZORPAY_TEST | {"environment": "production", "kyc_provider": "none"}))
+    production = live | {"environment": "production", "kyc_provider": "none"}
+    assert make_settings(**production).payment_gateway == "razorpay"
 
 
 def test_razorpay_secrets_are_masked() -> None:

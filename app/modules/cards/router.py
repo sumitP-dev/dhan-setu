@@ -4,7 +4,6 @@ from fastapi import APIRouter, Response, status
 
 from app.common.idempotency import IdempotencyKey
 from app.common.schemas import error_responses
-from app.modules.auth.dependencies import CurrentUser
 from app.modules.cards.dependencies import CardServiceDep
 from app.modules.cards.schemas import (
     CardRead,
@@ -13,6 +12,7 @@ from app.modules.cards.schemas import (
     CardVerificationStarted,
 )
 from app.modules.cards.service import FAILURE_MESSAGES, VerificationResult
+from app.modules.kyc.dependencies import VerifiedUser
 from app.modules.payments.dependencies import PaymentGatewayDep
 from app.modules.payments.schemas import CheckoutOptions
 
@@ -41,7 +41,7 @@ def _verification_read(result: VerificationResult) -> CardVerificationRead:
 
 
 @router.get("")
-async def list_cards(user: CurrentUser, service: CardServiceDep) -> list[CardRead]:
+async def list_cards(user: VerifiedUser, service: CardServiceDep) -> list[CardRead]:
     """Saved cards, default first. Only these can be used to pay."""
     return [CardRead.model_validate(card) for card in await service.list_cards(user)]
 
@@ -56,7 +56,7 @@ async def list_cards(user: CurrentUser, service: CardServiceDep) -> list[CardRea
     ),
 )
 async def start_card_verification(
-    user: CurrentUser,
+    user: VerifiedUser,
     service: CardServiceDep,
     gateway: PaymentGatewayDep,
     idempotency_key: IdempotencyKey,
@@ -82,7 +82,7 @@ async def start_card_verification(
     responses=error_responses(status.HTTP_404_NOT_FOUND, status.HTTP_422_UNPROCESSABLE_CONTENT),
 )
 async def get_card_verification(
-    verification_id: uuid.UUID, user: CurrentUser, service: CardServiceDep
+    verification_id: uuid.UUID, user: VerifiedUser, service: CardServiceDep
 ) -> CardVerificationRead:
     return _verification_read(await service.get_verification(user, verification_id))
 
@@ -100,7 +100,7 @@ async def get_card_verification(
 async def complete_card_verification(
     verification_id: uuid.UUID,
     body: CardVerificationComplete,
-    user: CurrentUser,
+    user: VerifiedUser,
     service: CardServiceDep,
 ) -> CardVerificationRead:
     """Send checkout's razorpay_payment_id and razorpay_signature. Safe to repeat."""
@@ -115,7 +115,7 @@ async def complete_card_verification(
     responses=error_responses(status.HTTP_404_NOT_FOUND, status.HTTP_422_UNPROCESSABLE_CONTENT),
 )
 async def set_default_card(
-    card_id: uuid.UUID, user: CurrentUser, service: CardServiceDep
+    card_id: uuid.UUID, user: VerifiedUser, service: CardServiceDep
 ) -> CardRead:
     return CardRead.model_validate(await service.set_default(user, card_id))
 
@@ -127,7 +127,7 @@ async def set_default_card(
         status.HTTP_404_NOT_FOUND, status.HTTP_422_UNPROCESSABLE_CONTENT, *_GATEWAY_ERRORS
     ),
 )
-async def remove_card(card_id: uuid.UUID, user: CurrentUser, service: CardServiceDep) -> Response:
+async def remove_card(card_id: uuid.UUID, user: VerifiedUser, service: CardServiceDep) -> Response:
     """Removes the card here and its saved token at the gateway."""
     await service.remove_card(user, card_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

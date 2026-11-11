@@ -4,7 +4,7 @@ from fastapi import APIRouter, status
 
 from app.common.idempotency import IdempotencyKey
 from app.common.schemas import error_responses
-from app.modules.auth.dependencies import CurrentUser
+from app.modules.kyc.dependencies import VerifiedUser
 from app.modules.payments.dependencies import PaymentGatewayDep, PaymentServiceDep
 from app.modules.payments.schemas import (
     CheckoutOptions,
@@ -60,7 +60,7 @@ def _payment_read(result: PaymentResult) -> PaymentRead:
 )
 async def create_payment_order(
     body: PaymentCreate,
-    user: CurrentUser,
+    user: VerifiedUser,
     service: PaymentServiceDep,
     gateway: PaymentGatewayDep,
     idempotency_key: IdempotencyKey,
@@ -96,7 +96,7 @@ async def create_payment_order(
     ),
 )
 async def verify_payment(
-    payment_id: uuid.UUID, body: PaymentVerify, user: CurrentUser, service: PaymentServiceDep
+    payment_id: uuid.UUID, body: PaymentVerify, user: VerifiedUser, service: PaymentServiceDep
 ) -> PaymentRead:
     """Send checkout's razorpay_payment_id and razorpay_signature. Safe to repeat."""
     result = await service.verify_payment(
@@ -110,7 +110,7 @@ async def verify_payment(
     responses=error_responses(status.HTTP_404_NOT_FOUND, status.HTTP_422_UNPROCESSABLE_CONTENT),
 )
 async def get_payment(
-    payment_id: uuid.UUID, user: CurrentUser, service: PaymentServiceDep
+    payment_id: uuid.UUID, user: VerifiedUser, service: PaymentServiceDep
 ) -> PaymentRead:
     """Payment status. Poll this while it's pending."""
     return _payment_read(await service.get_payment(user, payment_id))

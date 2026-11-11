@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.common.enums import UserRole, UserStatus
+from app.common.enums import KycStatus, UserRole, UserStatus
 from app.core.database import Base, TimestampMixin, UTCDateTime, UUIDPrimaryKeyMixin, str_enum
 
 
@@ -26,6 +26,13 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         server_default="pending_verification",
     )
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    # Changed only by KycService, which records every change in kyc_events. Cards,
+    # payments, UPI and bills need "verified".
+    kyc_status: Mapped[KycStatus] = mapped_column(
+        str_enum(KycStatus, length=16),
+        default=KycStatus.NOT_SUBMITTED,
+        server_default="not_submitted",
+    )
 
     def __repr__(self) -> str:
         # Never include password_hash.

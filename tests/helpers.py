@@ -4,11 +4,12 @@ import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from fastapi import FastAPI
 from httpx import AsyncClient, Response
 from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 
-from app.common.enums import OtpPurpose
+from app.common.enums import KycStatus, OtpPurpose
 from app.core.config import Settings
 
 if TYPE_CHECKING:
@@ -176,6 +177,27 @@ async def login(
     return await client.post(
         "/api/v1/auth/login", json={"identifier": identifier, "password": password}
     )
+
+
+async def mark_kyc_verified(app: FastAPI, user_id: str) -> None:
+    """Walk the user through the real KYC status changes to "verified"."""
+    from app.modules.kyc.repository import KycRepository  # noqa: PLC0415
+    from app.modules.kyc.service import KycService  # noqa: PLC0415
+
+    async with app.state.session_factory() as session:
+        service = KycService(KycRepository(session))
+        for target in (KycStatus.IN_PROGRESS, KycStatus.PENDING_REVIEW, KycStatus.VERIFIED):
+            await service.transition(uuid.UUID(user_id), target, reason="test_setup")
+        await session.commit()
+
+
+async def register_kyc_verified(
+    client: AsyncClient, app: FastAPI, **overrides: str
+) -> dict[str, Any]:
+    """register(), then KYC verified: for tests of cards, payments, UPI and bills."""
+    body = await register(client, **overrides)
+    await mark_kyc_verified(app, body["user"]["id"])
+    return body
 
 
 def bearer(access_token: str) -> dict[str, str]:
