@@ -60,6 +60,7 @@ class KycStatus(StrEnum):
 class OtpPurpose(StrEnum):
     VERIFY_PHONE = "verify_phone"
     LOGIN = "login"
+    ADMIN_LOGIN = "admin_login"  # second step of admin portal sign-in
     RESET_PASSWORD = "reset_password"  # noqa: S105  (reserved; no endpoint uses it yet)
 
 

@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     kyc_app_return_url: str = "dhansetu://kyc/digilocker"
 
+    # Admin portal. Sign-in is password + an OTP to the admin's phone. The refresh token
+    # lives in an httpOnly cookie; the access token only in the portal's memory.
+    admin_access_token_ttl_minutes: int = Field(default=10, ge=1, le=30)
+    # A session ends after this long without a refresh, or this long in total.
+    admin_session_idle_minutes: int = Field(default=30, ge=5, le=240)
+    admin_session_max_hours: int = Field(default=8, ge=1, le=24)
+    # Browser origins of the admin portal. Cookie requests from any other origin are
+    # refused, and CORS (with credentials) is allowed only for these.
+    admin_origins: list[str] = ["http://localhost:5173"]
+    # Secure cookies need https. Only local http development may turn this off.
+    admin_cookie_secure: bool = True
+
     # Cards. Each new card is checked with a ₹1 charge that is refunded straight away.
     # Small test charges are how stolen cards get tried, so new checks are capped per user.
     card_verifications_per_day: int = Field(default=5, gt=0, le=50)
@@ -118,6 +130,18 @@ class Settings(BaseSettings):
         except ValueError as error:
             msg = f"KYC_ENCRYPTION_KEY {error}"
             raise ValueError(msg) from error
+        return self
+
+    @model_validator(mode="after")
+    def _admin_portal_is_safe(self) -> "Settings":
+        if self.environment != "production":
+            return self
+        if not self.admin_cookie_secure:
+            msg = "ADMIN_COOKIE_SECURE must be true in production"
+            raise ValueError(msg)
+        if any(not origin.startswith("https://") for origin in self.admin_origins):
+            msg = "ADMIN_ORIGINS must all be https in production"
+            raise ValueError(msg)
         return self
 
     @model_validator(mode="after")

@@ -2,12 +2,13 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.common.enums import KycStatus, UserRole
+from app.common.enums import KycStatus
 from app.common.exceptions import ForbiddenError
 from app.core.config import AppSettings
 from app.core.database import DbSession
 from app.core.encryption import FieldCipher
-from app.modules.auth.dependencies import CurrentUser, require_roles
+from app.modules.admin_auth.dependencies import CurrentAdmin
+from app.modules.auth.dependencies import CurrentUser
 from app.modules.kyc.documents import KycDocumentService
 from app.modules.kyc.provider import KycProvider
 from app.modules.kyc.repository import KycRepository
@@ -76,7 +77,8 @@ def get_kyc_review_service(
 
 KycReviewServiceDep = Annotated[KycReviewService, Depends(get_kyc_review_service)]
 
-AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
+# Admin portal tokens only (not customer-app tokens), with a live admin session.
+AdminUser = CurrentAdmin
 
 
 class KycRequiredError(ForbiddenError):

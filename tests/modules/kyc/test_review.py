@@ -12,7 +12,7 @@ from app.common.enums import KycStatus, UserRole
 from app.modules.kyc.models import KycAccessLog, KycEvent, KycProfile
 from app.modules.kyc.provider.fake import FakeKycProvider
 from app.modules.kyc.schemas import REJECTION_MESSAGES
-from tests.helpers import bearer, register, start_registration
+from tests.helpers import bearer, register, register_admin, start_registration
 from tests.modules.kyc.test_digilocker import START, complete, kyc, move
 from tests.modules.kyc.test_selfie import take_selfie
 
@@ -44,18 +44,10 @@ def headers(user: tuple[str, Headers]) -> Headers:
     return user[1]
 
 
-async def make_admin(app: FastAPI, email: str) -> None:
-    async with app.state.session_factory() as session:
-        await set_role(session, email, UserRole.ADMIN)
-
-
 @pytest.fixture
 async def admin(client: AsyncClient, app: FastAPI) -> tuple[str, Headers]:
-    body = await register(
-        client, email="admin@example.com", phone="9000000009", full_name="Meera Admin"
-    )
-    await make_admin(app, "admin@example.com")
-    return body["user"]["id"], bearer(body["tokens"]["access_token"])
+    body, admin_headers = await register_admin(client, app)
+    return body["user"]["id"], admin_headers
 
 
 @pytest.fixture
@@ -157,7 +149,12 @@ async def test_details_are_frozen_under_review(client: AsyncClient, headers: Hea
 # ---- Who can review
 
 
-async def test_admin_routes_need_the_admin_role(client: AsyncClient, headers: Headers) -> None:
+async def test_admin_routes_refuse_customer_app_tokens(
+    client: AsyncClient, app: FastAPI, headers: Headers
+) -> None:
+    # Even an admin's own mobile-app token doesn't open admin routes.
+    admin_body, _ = await register_admin(client, app)
+    admin_app_headers = bearer(admin_body["tokens"]["access_token"])
     some_id = uuid.uuid4()
     for method, path in (
         ("GET", ADMIN),
@@ -165,11 +162,12 @@ async def test_admin_routes_need_the_admin_role(client: AsyncClient, headers: He
         ("POST", f"{ADMIN}/{some_id}/approve"),
         ("POST", f"{ADMIN}/{some_id}/reject"),
     ):
-        response = await client.request(
-            method, path, headers=headers, json={"reason": "other", "note": "x" * 5}
-        )
-        assert response.status_code == 403, path
-        assert error_code(response) == "insufficient_role"
+        for token_headers in (headers, admin_app_headers):
+            response = await client.request(
+                method, path, headers=token_headers, json={"reason": "other", "note": "x" * 5}
+            )
+            assert response.status_code == 401, path
+            assert error_code(response) == "invalid_token"
         assert (await client.request(method, path)).status_code == 401
 
 
@@ -195,15 +193,14 @@ async def test_admin_role_only_for_active_accounts(
 
 
 async def test_admin_cannot_review_own_kyc(
-    client: AsyncClient,
-    app: FastAPI,
-    admin: tuple[str, Headers],
-    provider: FakeKycProvider,
-    db_session: AsyncSession,
+    client: AsyncClient, app: FastAPI, provider: FakeKycProvider, db_session: AsyncSession
 ) -> None:
-    admin_id, admin_headers = admin
-    await finish_steps(client, admin_headers, provider, db_session)
-    assert (await client.post(SUBMIT, headers=admin_headers)).status_code == 200
+    body, admin_headers = await register_admin(client, app)
+    admin_id = body["user"]["id"]
+    # The admin does their own KYC in the mobile app, like anyone else.
+    app_headers = bearer(body["tokens"]["access_token"])
+    await finish_steps(client, app_headers, provider, db_session)
+    assert (await client.post(SUBMIT, headers=app_headers)).status_code == 200
 
     detail = (await client.get(f"{ADMIN}/{admin_id}", headers=admin_headers)).json()
     assert detail["can_decide"] is False

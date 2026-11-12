@@ -21,15 +21,13 @@ from app.core.rate_limit import AttemptLimiter, Cooldown
 from app.core.security import (
     burn_password_check,
     create_access_token,
-    generate_otp,
     generate_refresh_token,
-    hash_otp,
     hash_password,
     hash_refresh_token,
-    otp_matches,
     verify_password,
 )
-from app.modules.auth.models import MAX_DEVICE_INFO_LENGTH, OtpCode, RefreshToken
+from app.modules.auth.models import MAX_DEVICE_INFO_LENGTH, RefreshToken
+from app.modules.auth.otp import OtpService, invalid_otp
 from app.modules.auth.repository import OtpRepository, RefreshTokenRepository
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
@@ -73,7 +71,7 @@ def _invalid_refresh_token() -> UnauthorizedError:
 
 
 def _invalid_otp() -> BadRequestError:
-    return BadRequestError("Invalid or expired code", code="invalid_otp")
+    return invalid_otp()
 
 
 def account_disabled() -> ForbiddenError:
@@ -114,6 +112,7 @@ class AuthService:
         self._login_limiter = login_limiter
         self._password_change_limiter = password_change_limiter
         self._otp_cooldown = otp_cooldown
+        self._otp = OtpService(session, otps, sms, settings)
 
     # ---- Registration and OTP
 
@@ -159,27 +158,7 @@ class AuthService:
 
     async def verify_otp(self, data: OtpVerifyRequest, *, device_info: str | None) -> AuthResult:
         """verify_phone activates the account; both purposes sign the user in."""
-        now = utcnow()
-        otp = await self._otps.get_active(data.phone, data.purpose, now=now)
-        if otp is None:
-            raise _invalid_otp()
-
-        if not await self._otps.record_attempt(
-            otp.id, max_attempts=self._settings.otp_max_attempts
-        ):
-            raise TooManyRequestsError(
-                "Too many wrong codes. Request a new one.", code="otp_attempts_exceeded"
-            )
-        secret = self._settings.jwt_secret_key
-        if not otp_matches(
-            data.code, otp.code_hash, phone=data.phone, purpose=data.purpose, secret=secret
-        ):
-            # Commit now: the request is about to fail, and a failing request is rolled
-            # back, which would undo the attempt count.
-            await self._session.commit()
-            raise _invalid_otp()
-        if not await self._otps.consume(otp.id, now=now):
-            raise _invalid_otp()  # used by a parallel request
+        await self._otp.check(data.phone, data.purpose, data.code)
 
         user = await self._users.get_by_phone(data.phone)
         if user is None:
@@ -271,21 +250,7 @@ class AuthService:
         return f"{purpose}:{phone}"
 
     async def _issue_otp(self, phone: str, purpose: OtpPurpose) -> str:
-        now = utcnow()
-        code = generate_otp()
-        await self._otps.invalidate_active(phone, purpose, now=now)
-        await self._otps.add(
-            OtpCode(
-                phone=phone,
-                purpose=purpose,
-                code_hash=hash_otp(
-                    code, phone=phone, purpose=purpose, secret=self._settings.jwt_secret_key
-                ),
-                expires_at=now + timedelta(minutes=self._settings.otp_ttl_minutes),
-            )
-        )
-        await self._sms.send_otp(phone, code, purpose)
-        return code
+        return await self._otp.issue(phone, purpose)
 
     def _otp_sent(self, code: str | None) -> OtpSentResponse:
         return OtpSentResponse(

@@ -39,6 +39,11 @@ def make_settings(**overrides: Any) -> Settings:
         # Responses include dev_otp, which register() below relies on.
         "debug": True,
     } | overrides
+    if values["environment"] == "production":
+        values.setdefault("admin_origins", ["https://admin.dhansetu.example"])
+    else:
+        # The test client talks plain http, which never sends Secure cookies.
+        values.setdefault("admin_cookie_secure", False)
     return _IsolatedSettings(**values)
 
 
@@ -201,6 +206,53 @@ async def register_kyc_verified(
     body = await register(client, **overrides)
     await mark_kyc_verified(app, body["user"]["id"])
     return body
+
+
+# What the admin portal sends on its cookie requests.
+ADMIN_CLIENT = {"X-Admin-Client": "dhan-setu-admin"}
+
+
+async def make_admin(app: FastAPI, email: str) -> None:
+    from app.cli import set_role  # noqa: PLC0415  (keeps helpers light to import)
+    from app.common.enums import UserRole  # noqa: PLC0415
+
+    async with app.state.session_factory() as session:
+        await set_role(session, email, UserRole.ADMIN)
+
+
+async def admin_sign_in(
+    client: AsyncClient, email: str, password: str = TEST_PASSWORD
+) -> dict[str, Any]:
+    """Both steps of admin sign-in. Returns the /admin/auth/verify body; the session
+    cookie stays in the client."""
+    started = await client.post(
+        "/api/v1/admin/auth/login",
+        headers=ADMIN_CLIENT,
+        json={"email": email, "password": password},
+    )
+    assert started.status_code == 200, started.text
+    response = await client.post(
+        "/api/v1/admin/auth/verify",
+        headers=ADMIN_CLIENT,
+        json={
+            "challenge_token": started.json()["challenge_token"],
+            "code": started.json()["dev_otp"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    body: dict[str, Any] = response.json()
+    return body
+
+
+async def register_admin(
+    client: AsyncClient, app: FastAPI, **overrides: str
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """A new active admin, signed in to the portal: (register body, admin headers)."""
+    values = {"email": "admin@example.com", "phone": "9000000009", "full_name": "Meera Admin"}
+    body = await register(client, **(values | overrides))
+    await make_admin(app, body["user"]["email"])
+    signed_in = await admin_sign_in(client, body["user"]["email"])
+    return body, bearer(signed_in["access_token"])
 
 
 def bearer(access_token: str) -> dict[str, str]:

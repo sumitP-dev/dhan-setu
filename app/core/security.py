@@ -18,6 +18,11 @@ from app.common.validators import BCRYPT_MAX_PASSWORD_BYTES
 
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_TYPE = "access"  # noqa: S105  (a claim value, not a secret)
+ADMIN_CHALLENGE_TYPE = "admin_challenge"
+# Who a token is for. A customer-app token never works on admin endpoints, and the
+# other way round.
+APP_AUDIENCE = "dhan-setu-app"
+ADMIN_AUDIENCE = "dhan-setu-admin"
 BEARER_CHALLENGE = {"WWW-Authenticate": "Bearer"}
 
 
@@ -67,6 +72,8 @@ async def burn_password_check(password: str, *, rounds: int) -> None:
 class AccessTokenClaims:
     user_id: uuid.UUID
     expires_at: datetime
+    # Admin tokens belong to an admin session, which can be ended at any time.
+    session_id: uuid.UUID | None = None
 
 
 def create_access_token(
@@ -75,14 +82,19 @@ def create_access_token(
     secret: SecretStr,
     ttl: timedelta,
     now: datetime | None = None,
+    audience: str = APP_AUDIENCE,
+    session_id: uuid.UUID | None = None,
 ) -> str:
     issued_at = now or datetime.now(UTC)
-    payload = {
+    payload: dict[str, object] = {
         "sub": str(user_id),
         "type": ACCESS_TOKEN_TYPE,
+        "aud": audience,
         "iat": issued_at,
         "exp": issued_at + ttl,
     }
+    if session_id is not None:
+        payload["sid"] = str(session_id)
     return jwt.encode(payload, secret.get_secret_value(), algorithm=JWT_ALGORITHM)
 
 
@@ -90,7 +102,9 @@ def _invalid_token() -> UnauthorizedError:
     return UnauthorizedError("Invalid access token", code="invalid_token", headers=BEARER_CHALLENGE)
 
 
-def decode_access_token(token: str, *, secret: SecretStr) -> AccessTokenClaims:
+def decode_access_token(
+    token: str, *, secret: SecretStr, audience: str = APP_AUDIENCE
+) -> AccessTokenClaims:
     """Raises UnauthorizedError: code "token_expired" (client should refresh) or
     "invalid_token" (client should log in again)."""
     try:
@@ -98,7 +112,8 @@ def decode_access_token(token: str, *, secret: SecretStr) -> AccessTokenClaims:
             token,
             secret.get_secret_value(),
             algorithms=[JWT_ALGORITHM],
-            options={"require": ["sub", "type", "iat", "exp"]},
+            audience=audience,
+            options={"require": ["sub", "type", "aud", "iat", "exp"]},
         )
     except jwt.ExpiredSignatureError as exc:
         raise UnauthorizedError(
@@ -111,11 +126,52 @@ def decode_access_token(token: str, *, secret: SecretStr) -> AccessTokenClaims:
         raise _invalid_token()
     try:
         user_id = uuid.UUID(payload["sub"])
-    except (TypeError, ValueError) as exc:
+        session_id = uuid.UUID(payload["sid"]) if "sid" in payload else None
+    except (TypeError, ValueError, AttributeError) as exc:
         raise _invalid_token() from exc
     return AccessTokenClaims(
-        user_id=user_id, expires_at=datetime.fromtimestamp(payload["exp"], UTC)
+        user_id=user_id,
+        expires_at=datetime.fromtimestamp(payload["exp"], UTC),
+        session_id=session_id,
     )
+
+
+# ---- Admin sign-in challenge
+# After the password step, the admin gets this short-lived token and must send it back
+# with the OTP. It proves the password step passed; the OTP itself is single-use.
+
+
+def create_admin_challenge(user_id: uuid.UUID, *, secret: SecretStr, ttl: timedelta) -> str:
+    now = datetime.now(UTC)
+    payload = {
+        "sub": str(user_id),
+        "type": ADMIN_CHALLENGE_TYPE,
+        "aud": ADMIN_AUDIENCE,
+        "iat": now,
+        "exp": now + ttl,
+        "jti": secrets.token_urlsafe(16),
+    }
+    return jwt.encode(payload, secret.get_secret_value(), algorithm=JWT_ALGORITHM)
+
+
+def decode_admin_challenge(token: str, *, secret: SecretStr) -> uuid.UUID:
+    """The user id, or UnauthorizedError("invalid_challenge") for anything wrong."""
+    error = UnauthorizedError(
+        "Sign-in expired. Enter your email and password again.", code="invalid_challenge"
+    )
+    try:
+        payload = jwt.decode(
+            token,
+            secret.get_secret_value(),
+            algorithms=[JWT_ALGORITHM],
+            audience=ADMIN_AUDIENCE,
+            options={"require": ["sub", "type", "aud", "iat", "exp", "jti"]},
+        )
+        if payload["type"] != ADMIN_CHALLENGE_TYPE:
+            raise error
+        return uuid.UUID(payload["sub"])
+    except (jwt.InvalidTokenError, TypeError, ValueError, AttributeError) as exc:
+        raise error from exc
 
 
 # ---- Refresh tokens

@@ -54,12 +54,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         FieldCipher(decode_master_key(kyc_key.get_secret_value())) if kyc_key else None
     )
 
-    if settings.cors_origins:
+    browser_origins = list(dict.fromkeys([*settings.cors_origins, *settings.admin_origins]))
+    if browser_origins:
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=settings.cors_origins,
-            allow_methods=["*"],
-            allow_headers=["*"],
+            allow_origins=browser_origins,
+            # The admin portal sends its session cookie to /admin/auth/refresh.
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PATCH", "DELETE"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key", "X-Admin-Client"],
         )
 
     register_exception_handlers(app)

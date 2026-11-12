@@ -109,8 +109,45 @@ POST {{baseUrl}}/kyc/submit
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}
 
 
-### ---- Admin KYC review. Log in as an admin (python -m app.cli make-admin <email>) and set:
-@adminToken = paste-an-admin-access-token
+### ---- Admin portal sign-in (the account needs: python -m app.cli make-admin <email>)
+@adminEmail = admin@example.com
+
+### A1. Step 1: email + password (texts a code; dev_otp shows it when DEBUG=true)
+# @name adminLogin
+POST {{baseUrl}}/admin/auth/login
+X-Admin-Client: dhan-setu-admin
+Content-Type: application/json
+
+{
+  "email": "{{adminEmail}}",
+  "password": "Secret123"
+}
+
+
+### A2. Step 2: the code. Sets the session cookie, returns the access token.
+# @name adminVerify
+POST {{baseUrl}}/admin/auth/verify
+X-Admin-Client: dhan-setu-admin
+Content-Type: application/json
+
+{
+  "challenge_token": "{{adminLogin.response.body.$.challenge_token}}",
+  "code": "{{adminLogin.response.body.$.dev_otp}}"
+}
+
+
+### A3. New access token from the cookie
+POST {{baseUrl}}/admin/auth/refresh
+X-Admin-Client: dhan-setu-admin
+
+
+### A4. Sign out (ends the session at once)
+POST {{baseUrl}}/admin/auth/logout
+X-Admin-Client: dhan-setu-admin
+
+
+### ---- Admin KYC review (signed in with A1-A2)
+@adminToken = {{adminVerify.response.body.$.access_token}}
 @reviewUserId = paste-a-user-id
 
 ### R1. Review queue (waiting for review, oldest first)

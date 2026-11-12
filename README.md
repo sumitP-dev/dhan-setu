@@ -149,6 +149,11 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/api/v1/kyc/selfie` | Bearer | Start (or reuse the open) selfie session: returns `sdk_token` for the provider's SDK |
 | GET | `/api/v1/kyc/selfie/{id}` | Bearer | Selfie result (liveness + match with the Aadhaar photo); checks with the provider while open |
 | POST | `/api/v1/kyc/submit` | Bearer | Send for review once every step is done: status becomes `pending_review` |
+| POST | `/api/v1/admin/auth/login` | `X-Admin-Client` | Admin portal step 1: email + password of an admin; texts a code |
+| POST | `/api/v1/admin/auth/verify` | `X-Admin-Client` | Step 2: challenge + code; returns an access token, sets the session cookie |
+| POST | `/api/v1/admin/auth/refresh` | `X-Admin-Client` + cookie | New access token; replaces the cookie |
+| POST | `/api/v1/admin/auth/logout` | `X-Admin-Client` + cookie | Ends the session at once |
+| GET | `/api/v1/admin/auth/me` | Admin + `X-Admin-Client` | The signed-in admin |
 | GET | `/api/v1/admin/kyc?status=&limit=&offset=` | Admin | Review queue, longest-waiting first (masked data only) |
 | GET | `/api/v1/admin/kyc/{user_id}` | Admin | A user's KYC details, checks and history (each opening is logged) |
 | POST | `/api/v1/admin/kyc/{user_id}/approve` | Admin | Approve: status becomes `verified` |
@@ -212,6 +217,29 @@ Admin review (`/admin/kyc`, role `admin`):
 Only `KycService.transition()` changes the status: under a row lock, checked against the
 allowed changes, recorded in `kyc_events`. `KYC_PROVIDER=fake` (default outside
 production) or `none` (KYC off; required in production until a real provider is set up).
+
+### Admin portal sign-in
+
+"Admin" in the table means an admin portal access token; customer-app tokens never work
+there (each token names who it is for), and admin tokens never work in the app.
+
+1. `POST /admin/auth/login` with email + password. Only active admin accounts pass; a
+   customer, a wrong password and an unknown email all get the same 401. A code is texted
+   to the admin's phone (`admin_login` codes can't be swapped with app login codes).
+2. `POST /admin/auth/verify` with the `challenge_token` and the code. Returns a 10-minute
+   access token (keep it in memory only) and sets an httpOnly, SameSite=Strict cookie
+   holding the refresh token (`__Host-` prefixed and Secure outside local http).
+3. `POST /admin/auth/refresh` before the access token expires. The cookie is replaced each
+   time; an old cookie seen again ends the session (copied cookie), except within 10
+   seconds, when another tab just refreshed (409 `refresh_in_progress`: retry).
+4. A session ends after `ADMIN_SESSION_IDLE_MINUTES` (30) without a refresh,
+   `ADMIN_SESSION_MAX_HOURS` (8) in total, on logout, or when the account is blocked or
+   loses the admin role, and every access token of that session stops working at once.
+
+Cross-site protection: the cookie endpoints need the header
+`X-Admin-Client: dhan-setu-admin` and, when the browser sends one, an `Origin` listed in
+`ADMIN_ORIGINS`. CORS (with credentials) is open only to those origins. Every sign-in is
+kept in `admin_sessions` (time, IP, browser, how it ended).
 
 ### How auth works
 
