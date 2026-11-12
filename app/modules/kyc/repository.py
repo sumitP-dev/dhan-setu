@@ -1,11 +1,17 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import Select, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import KycStatus
-from app.modules.kyc.models import KycDigiLockerSession, KycEvent, KycProfile, KycSelfieSession
+from app.modules.kyc.models import (
+    KycAccessLog,
+    KycDigiLockerSession,
+    KycEvent,
+    KycProfile,
+    KycSelfieSession,
+)
 from app.modules.kyc.provider.base import DigiLockerStatus, SelfieStatus
 from app.modules.users.models import User
 
@@ -48,6 +54,57 @@ class KycRepository:
             select(KycEvent).where(KycEvent.user_id == user_id).order_by(KycEvent.created_at)
         )
         return list(result)
+
+    async def latest_event(self, user_id: uuid.UUID, to_status: KycStatus) -> KycEvent | None:
+        return await self._session.scalar(
+            select(KycEvent)
+            .where(KycEvent.user_id == user_id, KycEvent.to_status == to_status)
+            .order_by(KycEvent.created_at.desc(), KycEvent.id.desc())
+            .limit(1)
+        )
+
+    # ---- Admin review
+
+    def _submitted_at(self) -> Select[uuid.UUID, datetime]:
+        """When each user last submitted for review."""
+        return (
+            select(KycEvent.user_id, func.max(KycEvent.created_at).label("submitted_at"))
+            .where(KycEvent.to_status == KycStatus.PENDING_REVIEW)
+            .group_by(KycEvent.user_id)
+        )
+
+    async def list_for_review(
+        self, status: KycStatus, *, limit: int, offset: int
+    ) -> list[tuple[User, KycProfile | None, KycSelfieSession | None, datetime | None]]:
+        """Users in this KYC status, the longest-waiting submission first."""
+        submitted = self._submitted_at().subquery()
+        result = await self._session.execute(
+            select(User, KycProfile, KycSelfieSession, submitted.c.submitted_at)
+            .outerjoin(KycProfile, KycProfile.user_id == User.id)
+            .outerjoin(KycSelfieSession, KycSelfieSession.id == KycProfile.selfie_session_id)
+            .outerjoin(submitted, submitted.c.user_id == User.id)
+            .where(User.kyc_status == status)
+            .order_by(submitted.c.submitted_at.asc().nulls_last(), User.created_at, User.id)
+            .limit(limit)
+            .offset(offset)
+        )
+        return [(row[0], row[1], row[2], row[3]) for row in result.all()]
+
+    async def count_by_status(self, status: KycStatus) -> int:
+        count = await self._session.scalar(
+            select(func.count()).select_from(User).where(User.kyc_status == status)
+        )
+        return count or 0
+
+    async def get_user(self, user_id: uuid.UUID) -> User | None:
+        return await self._session.get(User, user_id)
+
+    async def submitted_at(self, user_id: uuid.UUID) -> datetime | None:
+        event = await self.latest_event(user_id, KycStatus.PENDING_REVIEW)
+        return event.created_at if event else None
+
+    def add_access_log(self, log: KycAccessLog) -> None:
+        self._session.add(log)
 
     # ---- DigiLocker sessions
 
@@ -96,6 +153,9 @@ class KycRepository:
         return count or 0
 
     # ---- Selfie sessions
+
+    async def get_selfie_by_id(self, selfie_id: uuid.UUID) -> KycSelfieSession | None:
+        return await self._session.get(KycSelfieSession, selfie_id)
 
     def add_selfie(self, selfie: KycSelfieSession) -> None:
         self._session.add(selfie)

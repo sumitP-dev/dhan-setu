@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.enums import KycStatus
 from app.modules.kyc.repository import KycRepository
+from app.modules.kyc.schemas import REJECTION_MESSAGES
 from app.modules.kyc.service import KycService
 from app.modules.kyc.state import (
     ALLOWED_TRANSITIONS,
@@ -95,6 +96,8 @@ async def test_new_user_has_not_submitted_kyc(
         "can_start": True,
         "next_step": "digilocker",
         "details": None,
+        "rejection_reason": None,
+        "rejection_message": None,
     }
     assert me.json()["kyc_status"] == "not_submitted"
 
@@ -112,7 +115,14 @@ async def test_new_user_has_not_submitted_kyc(
         ),
         (
             (KycStatus.IN_PROGRESS, KycStatus.PENDING_REVIEW, KycStatus.REJECTED),
-            {"status": "rejected", "can_start": True, "next_step": "digilocker"},
+            {
+                "status": "rejected",
+                "can_start": True,
+                "next_step": "digilocker",
+                # The test's reason isn't a known code, so it reads as "other".
+                "rejection_reason": "other",
+                "rejection_message": REJECTION_MESSAGES["other"],
+            },
         ),
         (
             (KycStatus.IN_PROGRESS, KycStatus.PENDING_REVIEW, KycStatus.VERIFIED),
@@ -132,7 +142,8 @@ async def test_kyc_reports_each_status(
 
     response = await client.get(KYC, headers=headers)
 
-    assert response.json() == expected | {"details": None}
+    no_rejection = {"rejection_reason": None, "rejection_message": None}
+    assert response.json() == no_rejection | expected | {"details": None}
     assert (await client.get(ME, headers=headers)).json()["kyc_status"] == expected["status"]
 
 

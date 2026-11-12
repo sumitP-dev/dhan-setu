@@ -19,6 +19,7 @@ class KycService:
         *,
         reason: str,
         actor_id: uuid.UUID | None = None,
+        note: str | None = None,
     ) -> User:
         """The only way a KYC status changes: under a row lock, checked against the
         allowed changes, and recorded in kyc_events."""
@@ -36,6 +37,7 @@ class KycService:
                 to_status=target,
                 reason=reason,
                 actor_id=actor_id,
+                note=note,
             )
         )
         await self._repository.flush()

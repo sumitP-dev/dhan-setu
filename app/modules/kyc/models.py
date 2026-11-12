@@ -23,9 +23,28 @@ class KycEvent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     reason: Mapped[str] = mapped_column(String(64))
     # The admin who approved or rejected; None when the user or the system changed it.
     actor_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    # The admin's internal note on a rejection. Never shown to the user.
+    note: Mapped[str | None] = mapped_column(Text)
 
     def __repr__(self) -> str:
         return f"KycEvent({self.from_status} -> {self.to_status})"
+
+
+class KycAccessLog(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Audit trail: one row each time an admin opens a user's KYC details (decrypted
+    personal data). Never updated or deleted."""
+
+    __tablename__ = "kyc_access_logs"
+
+    admin_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), index=True
+    )
+
+    def __repr__(self) -> str:
+        return f"KycAccessLog(admin_id={self.admin_id!s}, user_id={self.user_id!s})"
 
 
 class KycDigiLockerSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):

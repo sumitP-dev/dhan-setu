@@ -104,6 +104,41 @@ GET {{baseUrl}}/kyc/selfie/{{selfie.response.body.$.id}}
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}
 
 
+### 5g. Submit for review (after the selfie passes)
+POST {{baseUrl}}/kyc/submit
+Authorization: Bearer {{login.response.body.$.tokens.access_token}}
+
+
+### ---- Admin KYC review. Log in as an admin (python -m app.cli make-admin <email>) and set:
+@adminToken = paste-an-admin-access-token
+@reviewUserId = paste-a-user-id
+
+### R1. Review queue (waiting for review, oldest first)
+GET {{baseUrl}}/admin/kyc?status=pending_review&limit=50
+Authorization: Bearer {{adminToken}}
+
+
+### R2. One user's KYC details and history (logged)
+GET {{baseUrl}}/admin/kyc/{{reviewUserId}}
+Authorization: Bearer {{adminToken}}
+
+
+### R3. Approve
+POST {{baseUrl}}/admin/kyc/{{reviewUserId}}/approve
+Authorization: Bearer {{adminToken}}
+
+
+### R4. Reject (reason: name_mismatch | photo_mismatch | document_issue | other + note)
+POST {{baseUrl}}/admin/kyc/{{reviewUserId}}/reject
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "reason": "photo_mismatch",
+  "note": "Selfie looks like a photo of a screen"
+}
+
+
 ### 6. Update profile name
 PATCH {{baseUrl}}/users/me
 Authorization: Bearer {{login.response.body.$.tokens.access_token}}

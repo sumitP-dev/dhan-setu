@@ -39,7 +39,13 @@ from app.modules.kyc.provider.base import (
     normalize_pan,
 )
 from app.modules.kyc.repository import KycRepository
-from app.modules.kyc.schemas import KycDetails, KycNextStep, KycRead
+from app.modules.kyc.schemas import (
+    REJECTION_MESSAGES,
+    KycDetails,
+    KycNextStep,
+    KycRead,
+    rejection_reason,
+)
 from app.modules.kyc.service import KycService
 from app.modules.kyc.state import CAN_START
 from app.modules.users.models import User
@@ -99,13 +105,43 @@ class KycDocumentService:
 
     async def read(self, user: User) -> KycRead:
         profile = await self._repository.get_profile(user.id)
-        details = self._details(profile) if profile else None
+        details = self.details(profile) if profile else None
+        rejection = None
+        if user.kyc_status is KycStatus.REJECTED:
+            event = await self._repository.latest_event(user.id, KycStatus.REJECTED)
+            rejection = rejection_reason(event.reason if event else None)
         return KycRead(
             status=user.kyc_status,
             can_start=user.kyc_status in CAN_START,
             next_step=self._next_step(user.kyc_status, profile),
             details=details,
+            rejection_reason=rejection,
+            rejection_message=REJECTION_MESSAGES.get(rejection) if rejection else None,
         )
+
+    # ---- Submitting for review
+
+    async def submit(self, user: User) -> KycRead:
+        """Sends the KYC for an admin to review. Only when every step is done."""
+        locked = await self._repository.lock_user(user.id)
+        if locked is None:
+            raise NotFoundError("User not found", code="user_not_found")
+        if locked.kyc_status is KycStatus.PENDING_REVIEW:
+            raise ConflictError("Your KYC is already submitted.", code="kyc_already_submitted")
+        if locked.kyc_status is KycStatus.VERIFIED:
+            raise ConflictError("Your KYC is already verified.", code="kyc_already_verified")
+        profile = await self._repository.get_profile(user.id, for_update=True)
+        if (
+            locked.kyc_status is not KycStatus.IN_PROGRESS
+            or profile is None
+            or not profile.pan_verified
+            or profile.selfie_session_id is None
+        ):
+            raise ConflictError("Finish every KYC step first.", code="kyc_incomplete")
+        updated = await self._status.transition(
+            user.id, KycStatus.PENDING_REVIEW, reason="submitted"
+        )
+        return await self.read(updated)
 
     @staticmethod
     def _next_step(status: KycStatus, profile: KycProfile | None) -> KycNextStep | None:
@@ -119,7 +155,7 @@ class KycDocumentService:
             return "pan"
         return "submit" if profile.selfie_session_id else "selfie"
 
-    def _details(self, profile: KycProfile) -> KycDetails | None:
+    def details(self, profile: KycProfile) -> KycDetails | None:
         if self._cipher is None:
             return None
         try:

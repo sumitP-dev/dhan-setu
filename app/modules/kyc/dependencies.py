@@ -2,15 +2,16 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
-from app.common.enums import KycStatus
+from app.common.enums import KycStatus, UserRole
 from app.common.exceptions import ForbiddenError
 from app.core.config import AppSettings
 from app.core.database import DbSession
 from app.core.encryption import FieldCipher
-from app.modules.auth.dependencies import CurrentUser
+from app.modules.auth.dependencies import CurrentUser, require_roles
 from app.modules.kyc.documents import KycDocumentService
 from app.modules.kyc.provider import KycProvider
 from app.modules.kyc.repository import KycRepository
+from app.modules.kyc.review import KycReviewService
 from app.modules.kyc.selfie import KycSelfieService
 from app.modules.kyc.service import KycService
 from app.modules.users.models import User
@@ -59,6 +60,23 @@ def get_kyc_selfie_service(
 
 
 KycSelfieServiceDep = Annotated[KycSelfieService, Depends(get_kyc_selfie_service)]
+
+
+def get_kyc_review_service(
+    db: DbSession,
+    provider: KycProviderDep,
+    cipher: Annotated[FieldCipher | None, Depends(get_field_cipher)],
+    settings: AppSettings,
+) -> KycReviewService:
+    repository = KycRepository(db)
+    status = KycService(repository)
+    documents = KycDocumentService(repository, status, provider, cipher, settings)
+    return KycReviewService(repository, status, documents, settings)
+
+
+KycReviewServiceDep = Annotated[KycReviewService, Depends(get_kyc_review_service)]
+
+AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
 
 
 class KycRequiredError(ForbiddenError):

@@ -148,6 +148,11 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/api/v1/kyc/pan` | Bearer | PAN typed in, when it isn't in DigiLocker or didn't match |
 | POST | `/api/v1/kyc/selfie` | Bearer | Start (or reuse the open) selfie session: returns `sdk_token` for the provider's SDK |
 | GET | `/api/v1/kyc/selfie/{id}` | Bearer | Selfie result (liveness + match with the Aadhaar photo); checks with the provider while open |
+| POST | `/api/v1/kyc/submit` | Bearer | Send for review once every step is done: status becomes `pending_review` |
+| GET | `/api/v1/admin/kyc?status=&limit=&offset=` | Admin | Review queue, longest-waiting first (masked data only) |
+| GET | `/api/v1/admin/kyc/{user_id}` | Admin | A user's KYC details, checks and history (each opening is logged) |
+| POST | `/api/v1/admin/kyc/{user_id}/approve` | Admin | Approve: status becomes `verified` |
+| POST | `/api/v1/admin/kyc/{user_id}/reject` | Admin | Reject with `reason` (+ internal `note`): status becomes `rejected` |
 | GET | `/api/v1/cards` | Bearer + KYC | Saved cards, default first |
 | POST | `/api/v1/cards/verifications` | Bearer + KYC + `Idempotency-Key` | Start adding a card: ₹1 order + checkout options |
 | POST | `/api/v1/cards/verifications/{id}/complete` | Bearer + KYC | Send checkout's payment id + signature: saves the card, refunds ₹1 |
@@ -187,6 +192,22 @@ How documents are collected:
    the result itself: the person must be live and the face-match score against the Aadhaar
    photo at least `KYC_SELFIE_MIN_MATCH_SCORE` (default 80). Running DigiLocker again
    clears a passed selfie, since the photo may have changed. Then `next_step` is `submit`.
+
+6. `POST /kyc/submit` (`next_step` = `submit`) -> `pending_review`. Details can't change
+   while under review.
+
+Admin review (`/admin/kyc`, role `admin`):
+
+- There is no API that grants the admin role. On the server run
+  `.venv/bin/python -m app.cli make-admin <email>` (the account must be active);
+  `remove-admin <email>` takes it away, effective on the admin's next request.
+- Approve or reject (`name_mismatch`, `photo_mismatch`, `document_issue`, `other` with a
+  note). The user sees the reason's message, never the note. Two admins deciding at once:
+  one wins, the other gets 409. An admin can't decide on their own KYC.
+- A rejection frees the PAN (so its real owner isn't blocked); the user starts again
+  from DigiLocker.
+- Every decision is in `kyc_events` with the admin's id; every opening of a user's
+  details is in `kyc_access_logs`.
 
 Only `KycService.transition()` changes the status: under a row lock, checked against the
 allowed changes, recorded in `kyc_events`. `KYC_PROVIDER=fake` (default outside

@@ -158,3 +158,13 @@ async def get_selfie(
     """Selfie result; checks liveness and the face match with the provider while the
     session is open. Poll after the SDK closes."""
     return _selfie_read(await service.get(user.id, selfie_id))
+
+
+@router.post(
+    "/submit",
+    responses=error_responses(*_AUTH_ERRORS, status.HTTP_409_CONFLICT),
+)
+async def submit_kyc(user: CurrentUser, service: KycDocumentServiceDep) -> KycRead:
+    """Send the KYC for review once DigiLocker, PAN and the selfie are done
+    (`next_step` = "submit"). The status becomes "pending_review"."""
+    return await service.submit(user)
