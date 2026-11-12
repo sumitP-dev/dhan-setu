@@ -150,6 +150,21 @@ X-Admin-Client: dhan-setu-admin
 @adminToken = {{adminVerify.response.body.$.access_token}}
 @reviewUserId = paste-a-user-id
 
+### U1. Users (newest first). Filters: q, kyc_status, status, limit, offset
+GET {{baseUrl}}/admin/users?limit=50
+Authorization: Bearer {{adminToken}}
+
+
+### U2. One user: profile, KYC summary and cards
+GET {{baseUrl}}/admin/users/{{reviewUserId}}
+Authorization: Bearer {{adminToken}}
+
+
+### U3. All saved cards. Filters: q (last 4 / owner), status, network, card_type
+GET {{baseUrl}}/admin/cards?status=active
+Authorization: Bearer {{adminToken}}
+
+
 ### R1. Review queue (waiting for review, oldest first)
 GET {{baseUrl}}/admin/kyc?status=pending_review&limit=50
 Authorization: Bearer {{adminToken}}

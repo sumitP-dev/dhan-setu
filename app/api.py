@@ -1,6 +1,7 @@
 from fastapi import APIRouter, status
 
 from app.common.schemas import error_responses
+from app.modules.admin.router import router as admin_console_router
 from app.modules.admin_auth.router import router as admin_auth_router
 from app.modules.auth.router import router as auth_router
 from app.modules.cards.router import router as cards_router
@@ -20,6 +21,7 @@ api_router.include_router(users_router)
 api_router.include_router(kyc_router)
 api_router.include_router(admin_auth_router)
 api_router.include_router(kyc_admin_router)
+api_router.include_router(admin_console_router)
 api_router.include_router(cards_router)
 api_router.include_router(payments_router)
 api_router.include_router(webhooks_router)

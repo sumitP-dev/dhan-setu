@@ -154,6 +154,9 @@ Full interactive docs: http://localhost:8000/docs
 | POST | `/api/v1/admin/auth/refresh` | `X-Admin-Client` + cookie | New access token; replaces the cookie |
 | POST | `/api/v1/admin/auth/logout` | `X-Admin-Client` + cookie | Ends the session at once |
 | GET | `/api/v1/admin/auth/me` | Admin + `X-Admin-Client` | The signed-in admin |
+| GET | `/api/v1/admin/users?q=&kyc_status=&status=&limit=&offset=` | Admin | Everyone who signed up, newest first, with active card counts (searches are logged) |
+| GET | `/api/v1/admin/users/{user_id}` | Admin | One user: profile, KYC summary (who decided, why) and all cards (each opening is logged) |
+| GET | `/api/v1/admin/cards?q=&status=&network=&card_type=&limit=&offset=` | Admin | All saved cards with owners; `q` = last 4 digits, name, email or phone |
 | GET | `/api/v1/admin/kyc?status=&limit=&offset=` | Admin | Review queue, longest-waiting first (masked data only) |
 | GET | `/api/v1/admin/kyc/{user_id}` | Admin | A user's KYC details, checks and history (each opening is logged) |
 | POST | `/api/v1/admin/kyc/{user_id}/approve` | Admin | Approve: status becomes `verified` |
@@ -240,6 +243,13 @@ Cross-site protection: the cookie endpoints need the header
 `X-Admin-Client: dhan-setu-admin` and, when the browser sends one, an `Origin` listed in
 `ADMIN_ORIGINS`. CORS (with credentials) is open only to those origins. Every sign-in is
 kept in `admin_sessions` (time, IP, browser, how it ended).
+
+### Admin views of users and cards
+
+Read-only. `q` searches phone numbers when it looks like one (4+ digits), otherwise names
+and emails; `%` and `_` are taken literally. Card responses never include gateway tokens
+or customer ids. Searches and opening a user are recorded in `admin_audit_logs` (admin,
+action, user, search text).
 
 ### How auth works
 
