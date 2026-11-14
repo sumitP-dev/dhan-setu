@@ -34,6 +34,8 @@ from app.modules.kyc.provider.base import (
 from app.modules.payments.gateway.signatures import hmac_sha256_hex, signature_matches
 
 SESSION_TTL = timedelta(minutes=15)
+# Where consent links point unless the app serves its own fake DigiLocker page.
+DEFAULT_CONSENT_BASE_URL = "https://digilocker.fake.local/consent"
 MAX_MATCH_SCORE = 100
 
 DEFAULT_AADHAAR = AadhaarDetails(
@@ -74,7 +76,9 @@ class _Selfie:
 
 
 class FakeKycProvider:
-    def __init__(self) -> None:
+    def __init__(self, consent_base_url: str = DEFAULT_CONSENT_BASE_URL) -> None:
+        # Local development points this at app/modules/kyc/dev_router.py.
+        self._consent_base_url = consent_base_url.rstrip("/")
         self._webhook_secret = secrets.token_hex(32)
         self.unavailable = False  # tests: simulate a network failure
         self.digilocker: dict[str, _DigiLocker] = {}
@@ -112,7 +116,7 @@ class FakeKycProvider:
         session_id = _new_id("dls")
         session = DigiLockerSession(
             id=session_id,
-            consent_url=f"https://digilocker.fake.local/consent/{session_id}",
+            consent_url=f"{self._consent_base_url}/{session_id}",
             expires_at=_now() + SESSION_TTL,
         )
         self.digilocker[session_id] = _DigiLocker(
@@ -147,6 +151,10 @@ class FakeKycProvider:
         """Tests: the user refuses consent, the session expires or DigiLocker fails."""
         entry = self._digilocker_entry(session_id)
         entry.result = DigiLockerResult(session_id=session_id, status=status, failure_reason=reason)
+
+    def digilocker_redirect_url(self, session_id: str) -> str:
+        """Where DigiLocker would send the user's browser once they're done."""
+        return self._digilocker_entry(session_id).redirect_url
 
     def _digilocker_entry(self, session_id: str) -> _DigiLocker:
         require_session_id(session_id)

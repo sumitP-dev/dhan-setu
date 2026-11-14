@@ -92,7 +92,8 @@ async def test_start_returns_a_consent_link(
     session = await start(client, headers)
 
     assert session["status"] == "pending"
-    assert session["consent_url"].startswith("https://")
+    # Tests run with DEBUG on, so the fake links to the dev consent page.
+    assert session["consent_url"].startswith("http://localhost:8000/api/v1/kyc/dev/digilocker/")
     assert session["failure_reason"] is None
     entry = provider.digilocker[provider_session_id(provider, session["consent_url"])]
     assert entry.redirect_url.startswith(

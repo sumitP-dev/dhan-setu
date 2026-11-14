@@ -221,6 +221,14 @@ Only `KycService.transition()` changes the status: under a row lock, checked aga
 allowed changes, recorded in `kyc_events`. `KYC_PROVIDER=fake` (default outside
 production) or `none` (KYC off; required in production until a real provider is set up).
 
+Trying KYC locally: with `KYC_PROVIDER=fake` and `DEBUG=true` (never in production), the
+fake's `consent_url` opens a stand-in DigiLocker page (`/api/v1/kyc/dev/digilocker/{id}`,
+`app/modules/kyc/dev_router.py`) with **Allow**, **Allow without PAN** and **Deny**. It then
+goes through the real callback, so the app gets `dhansetu://kyc/digilocker?status=...` as
+it would from DigiLocker. The fake shares Aadhaar for "Asha Verma" (born 17 May 1994) and
+knows one PAN, `ABCPV1234F`. One PAN per account applies, so only one local account can
+verify it; others get "already linked to another account".
+
 ### Admin portal sign-in
 
 "Admin" in the table means an admin portal access token; customer-app tokens never work

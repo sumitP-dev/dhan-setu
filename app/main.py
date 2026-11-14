@@ -11,6 +11,7 @@ from app.core.database import create_db_engine, create_session_factory
 from app.core.encryption import FieldCipher, decode_master_key
 from app.core.logging import configure_logging
 from app.core.redis import create_redis_client
+from app.modules.kyc.dev_router import router as kyc_dev_router
 from app.modules.kyc.provider import create_kyc_provider
 from app.modules.notifications.service import ConsoleSmsSender
 from app.modules.payments.gateway import create_payment_gateway
@@ -67,4 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    if settings.fake_kyc_pages_enabled:
+        # Local development only: a stand-in DigiLocker consent page.
+        app.include_router(kyc_dev_router, prefix=settings.api_v1_prefix)
     return app

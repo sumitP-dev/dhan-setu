@@ -180,6 +180,13 @@ class Settings(BaseSettings):
         return self.environment != "production"
 
     @property
+    def fake_kyc_pages_enabled(self) -> bool:
+        """Serve a stand-in DigiLocker consent page, so KYC can be tried end to end
+        without a provider account. Only with the fake provider, DEBUG on, and never in
+        production."""
+        return self.kyc_provider == "fake" and self.debug and self.environment != "production"
+
+    @property
     def expose_dev_otp(self) -> bool:
         """Return OTPs in API responses so developers don't need a real SMS.
         Never in production, even if DEBUG is switched on there by mistake."""
