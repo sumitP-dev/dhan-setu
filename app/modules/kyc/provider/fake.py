@@ -244,6 +244,13 @@ class FakeKycProvider:
             session_id=session_id, status=SelfieStatus.FAILED, failure_reason=reason
         )
 
+    def selfie_session_for_token(self, sdk_token: str) -> str:
+        """The selfie session an SDK token belongs to (what the real SDK knows)."""
+        for session_id, entry in self.selfies.items():
+            if secrets.compare_digest(entry.session.sdk_token, sdk_token):
+                return session_id
+        raise KycSessionNotFoundError
+
     def _selfie_entry(self, session_id: str) -> _Selfie:
         require_session_id(session_id)
         entry = self.selfies.get(session_id)

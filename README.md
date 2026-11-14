@@ -225,9 +225,13 @@ Trying KYC locally: with `KYC_PROVIDER=fake` and `DEBUG=true` (never in producti
 fake's `consent_url` opens a stand-in DigiLocker page (`/api/v1/kyc/dev/digilocker/{id}`,
 `app/modules/kyc/dev_router.py`) with **Allow**, **Allow without PAN** and **Deny**. It then
 goes through the real callback, so the app gets `dhansetu://kyc/digilocker?status=...` as
-it would from DigiLocker. The fake shares Aadhaar for "Asha Verma" (born 17 May 1994) and
-knows one PAN, `ABCPV1234F`. One PAN per account applies, so only one local account can
-verify it; others get "already linked to another account".
+it would from DigiLocker. The fake shares Aadhaar for "Asha Verma" (born 17 May 1994). Each
+session gets its own test PAN (`ASHPV` + 4 digits + a letter, shown on the page), because
+one PAN per account applies; **Allow** shares it, and after **Allow without PAN** you can
+type it in the app.
+The app's development build has its own stand-in for the selfie SDK. It reports the chosen
+outcome (`pass`, `low_match`, `not_live`, `no_face`) to `POST /api/v1/kyc/dev/selfie/{sdk_token}`,
+then the app asks `GET /kyc/selfie/{id}` as usual.
 
 ### Admin portal sign-in
 
